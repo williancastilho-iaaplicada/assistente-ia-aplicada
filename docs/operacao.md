@@ -46,7 +46,7 @@ O modo é lido a cada mensagem: muda na hora, sem reiniciar nada.
 ### Dados dos leads e briefing
 - Banco Postgres na VPS (`chatbot`): tabela `leads` (cadastro, reserva, lembretes) e tabela `mensagens` (conversa completa, dos dois lados, inclusive lembretes).
 - Para ver pelo navegador: Easypanel → projeto `chatbot` → serviço `db` → botão DbGate. Dá para filtrar e exportar.
-- Briefing por e-mail (fluxo "Briefing por e-mail", a cada 5 minutos): um e-mail quando a reunião é marcada e outro 1 hora antes, com resumo feito pela IA, cadastro, link e conversa completa. O destinatário é a chave `email_briefing` da tabela `config`; o envio usa o Gmail (`GMAIL_USER` e `GMAIL_APP_PASSWORD` no `.env`, depois `python3 infra/deploy.py update-n8n`).
+- Briefing por e-mail (fluxo "Briefing por e-mail", a cada 5 minutos): um e-mail quando a reunião é marcada e outro 1 hora antes, com resumo feito pela IA, cadastro, link e conversa completa. O destinatário é a chave `email_briefing` da tabela `config`; o envio usa o Resend (`RESEND_API_KEY` no `.env`; remetente opcional em `RESEND_FROM`, padrão `onboarding@resend.dev`; depois `python3 infra/deploy.py update-n8n`). Sem domínio verificado, o Resend só entrega para o e-mail da própria conta.
 
 ### Riscos conhecidos
 - WhatsApp não oficial: o número pode ser bloqueado pelo WhatsApp. Use para validação; a API oficial fica para depois.
@@ -75,7 +75,7 @@ Open the QR Code page, disconnect the current number if any, scan with the new p
 `.env`, the knowledge base and the generated workflows (which embed the base) never go to git.
 
 ### Lead data and briefing
-Postgres on the VPS keeps `leads` (profile, booking, reminders) and `mensagens` (full two-sided conversation). Browse it through Easypanel → `chatbot` → `db` → DbGate. A briefing email (AI summary, profile, link, full conversation) goes out when a meeting is booked and 1 hour before; recipient in `config.email_briefing`, sent through Gmail (`GMAIL_USER`, `GMAIL_APP_PASSWORD`).
+Postgres on the VPS keeps `leads` (profile, booking, reminders) and `mensagens` (full two-sided conversation). Browse it through Easypanel → `chatbot` → `db` → DbGate. A briefing email (AI summary, profile, link, full conversation) goes out when a meeting is booked and 1 hour before; recipient in `config.email_briefing`, sent through Resend (`RESEND_API_KEY`, optional `RESEND_FROM`; without a verified domain Resend only delivers to the account owner email).
 
 ### Known risks
 Unofficial WhatsApp may get the number banned; API usage is pay-as-you-go, so set spending limits.

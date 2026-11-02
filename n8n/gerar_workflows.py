@@ -36,7 +36,6 @@ CRED = {
     "redis": {"redis": {"id": "chatbotRedis00001", "name": "Redis chatbot"}},
     "anthropic": {"anthropicApi": {"id": "chatbotAnthropic1", "name": "Anthropic chatbot"}},
     "openai": {"openAiApi": {"id": "chatbotOpenAi0001", "name": "OpenAI chatbot"}},
-    "smtp": {"smtp": {"id": "chatbotSmtpGmail1", "name": "Gmail briefing"}},
 }
 
 EVO_HEADERS = {"parameters": [{"name": "apikey", "value": "={{ $env.EVOLUTION_API_KEY }}"}]}
@@ -593,10 +592,12 @@ br.add("Claude resume", "n8n-nodes-base.httpRequest", 4.2, {
     "sendBody": True, "specifyBody": "json", "jsonBody": "={{ JSON.stringify($json.body) }}", "options": {}},
     creds=CRED["anthropic"])
 br.add("Montar e-mail", "n8n-nodes-base.code", 2, {"mode": "runOnceForEachItem", "language": "javaScript", "jsCode": BRIEF_EMAIL})
-br.add("Enviar e-mail", "n8n-nodes-base.emailSend", 2.1,
-       {"fromEmail": "={{ 'Assistente IA Aplicada <' + $env.GMAIL_USER + '>' }}", "toEmail": "={{ $json.para }}",
-        "subject": "={{ $json.assunto }}", "emailFormat": "html", "html": "={{ $json.html }}", "options": {}},
-       creds=CRED["smtp"])
+br.add("Enviar e-mail", "n8n-nodes-base.httpRequest", 4.2, {
+    "method": "POST", "url": "https://api.resend.com/emails",
+    "sendHeaders": True, "headerParameters": {"parameters": [{"name": "Authorization", "value": "=Bearer {{ $env.RESEND_API_KEY }}"}]},
+    "sendBody": True, "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify({ from: $env.RESEND_FROM || 'Assistente IA Aplicada <onboarding@resend.dev>', to: [$json.para], subject: $json.assunto, html: $json.html }) }}",
+    "options": {}})
 br.add("Registrar briefing", "n8n-nodes-base.postgres", 2.8,
        sql("UPDATE leads SET briefing_reserva_em = CASE WHEN $2 = 'reserva' THEN now() ELSE briefing_reserva_em END, "
            "briefing_1h_em = CASE WHEN $2 = '1h' THEN now() ELSE briefing_1h_em END WHERE jid = $1",

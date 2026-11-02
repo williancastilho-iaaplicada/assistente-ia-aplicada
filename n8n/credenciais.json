@@ -38,17 +38,5 @@
   "data": {
    "apiKey": ""
   }
- },
- {
-  "id": "chatbotSmtpGmail1",
-  "name": "Gmail briefing",
-  "type": "smtp",
-  "data": {
-   "user": "",
-   "password": "",
-   "host": "smtp.gmail.com",
-   "port": 465,
-   "secure": true
-  }
  }
 ]
