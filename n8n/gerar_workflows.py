@@ -234,7 +234,7 @@ const texto = [
   `*${motivo}*`,
   `Nome: ${v(l.nome)}`,
   `Perfil: ${v(l.perfil, 'indefinido')}`,
-  `E-mail do Convite: ${v(l.email, 'pendente')}`,
+  `E-mail do Convite: ${v(l.email, l.reserva_status === 'reservado' ? 'não informado (link enviado no WhatsApp)' : 'pendente')}`,
   `Telefone WhatsApp: +${v(l.telefone_origem)}${l.telefone_preferencial ? ' (preferencial: ' + l.telefone_preferencial + ')' : ''}`,
   `Objetivo Principal: ${v(l.objetivo)}`,
   `Experiência com IA: ${v(l.experiencia)}`,
@@ -242,7 +242,7 @@ const texto = [
   `Principal Gargalo/Rotina: ${v(l.problema)}`,
   `Interesse Identificado: ${v(l.interesse, 'indefinido')}`,
   `Status da Ementa: ${v(l.ementa, 'não solicitada')}`,
-  `Status da Agenda: ${l.reserva_status === 'reservado' ? 'Reservado em ' + quando : l.reserva_status === 'cancelado' ? 'Cancelado' : 'Pendente de horário'}${l.preferencia_agenda ? ' (preferência: ' + l.preferencia_agenda + ')' : ''}`,
+  `Status da Agenda: ${l.reserva_status === 'reservado' ? 'Reservado em ' + quando + (l.reserva_link ? ' · ' + l.reserva_link : '') : l.reserva_status === 'cancelado' ? 'Cancelado' : 'Pendente de horário'}${l.preferencia_agenda ? ' (preferência: ' + l.preferencia_agenda + ')' : ''}`,
   `Próximo Passo: ${p.acao === 'encaminhar_humano' ? 'responder o contato (bot pausado para ele; mande #bot na conversa para devolver)' : (p.acao === 'registrar_preferencia_agenda' ? 'confirmar o horário com o contato' : 'nenhuma ação necessária; o convite saiu pelo Cal.com')}`,
 ].join('\n');
 const cfg = $('Config').first().json;
@@ -273,7 +273,10 @@ try {
     return [{ json: out }];
   }
   if (!p.inicio || isNaN(new Date(p.inicio))) throw new Error('sem horário');
-  if (!lead.email) { out.resposta = 'Para enviar o convite, qual e-mail você prefere usar?'; out.acao = 'nenhuma'; return [{ json: out }]; }
+  const cfg = $('Config').first().json;
+  const semEmail = !lead.email;
+  const emailReserva = lead.email || cfg.email_sem_convite;
+  if (!emailReserva) throw new Error('sem e-mail');
   let r;
   if (p.acao === 'remarcar' && lead.reserva_uid && lead.reserva_status === 'reservado') {
     r = await this.helpers.httpRequest({ method: 'POST', url: `https://api.cal.com/v2/bookings/${lead.reserva_uid}/reschedule`, headers: h,
@@ -286,15 +289,18 @@ try {
     const fone = String(lead.telefone_preferencial || lead.telefone_origem || '').replace(/\D/g, '');
     r = await this.helpers.httpRequest({ method: 'POST', url: 'https://api.cal.com/v2/bookings', headers: h, json: true, body: {
       start: new Date(p.inicio).toISOString(), eventTypeId,
-      attendee: { name: lead.nome || 'Contato WhatsApp', email: lead.email, timeZone: TZ, language: 'pt', ...(fone ? { phoneNumber: '+' + fone } : {}) },
+      attendee: { name: lead.nome || 'Contato WhatsApp', email: emailReserva, timeZone: TZ, language: 'pt', ...(fone ? { phoneNumber: '+' + fone } : {}) },
       metadata: { origem: 'whatsapp' } } });
   }
   const b = r.data || {};
-  out.lead.reserva_uid = b.uid; out.lead.reserva_inicio = b.start; out.lead.reserva_status = 'reservado'; out.lead.estado = 'reservado';
   const link = b.meetingUrl || (typeof b.location === 'string' && b.location.startsWith('http') ? b.location : '');
+  out.lead.reserva_uid = b.uid; out.lead.reserva_inicio = b.start; out.lead.reserva_status = 'reservado'; out.lead.estado = 'reservado';
+  out.lead.reserva_link = link; out.lead.reserva_criada_em = new Date().toISOString();
+  const convite = semEmail ? 'Como não tenho seu e-mail, o acesso fica aqui na conversa' : `o convite foi enviado para ${lead.email}`;
   out.resposta = [
-    `Combinado, ${lead.nome || ''}! ${p.acao === 'remarcar' ? 'Remarquei para' : 'Marcado para'} ${quando(b.start)} (horário de Brasília). Seu encontro com o Willian terá 30 minutos e o convite foi enviado para ${lead.email}.`.replace(' , ', ' '),
-    link ? `Acesso: ${link}` : 'O link de acesso está no convite.',
+    `Combinado${lead.nome ? ', ' + lead.nome : ''}! ${p.acao === 'remarcar' ? 'Remarquei para' : 'Marcado para'} ${quando(b.start)} (horário de Brasília). Seu encontro com o Willian terá 30 minutos e ${convite}.`,
+    link ? `Acesso: ${link}` : 'O link de acesso chega por aqui 15 minutos antes.',
+    'No dia, às 8h, eu confirmo sua presença; 1 hora antes, lembro você de se preparar; e 15 minutos antes, envio o link de novo.',
     'Traga suas dúvidas e uma visão geral da rotina que deseja melhorar. Se precisar remarcar, é só avisar por aqui!',
   ].join('\n\n');
   out.avisar = true;
@@ -312,7 +318,8 @@ f.add("Config", "n8n-nodes-base.postgres", 2.8,
       sql("SELECT COALESCE(MAX(valor) FILTER (WHERE chave='modo'),'self_only') AS modo, "
           "COALESCE(MAX(valor) FILTER (WHERE chave='instancia'),'atendimento') AS instancia, "
           "COALESCE(MAX(valor) FILTER (WHERE chave='notificar_numero'),'') AS notificar_numero, "
-          "COALESCE(MAX(valor) FILTER (WHERE chave='calcom_evento'),'30min') AS calcom_evento FROM config", ""),
+          "COALESCE(MAX(valor) FILTER (WHERE chave='calcom_evento'),'30min') AS calcom_evento, "
+          "COALESCE(MAX(valor) FILTER (WHERE chave='email_sem_convite'),'') AS email_sem_convite FROM config", ""),
       creds=CRED["postgres"], executeOnce=True)
 f.add("Aplicar modo", "n8n-nodes-base.code", 2, code(DECIDE))
 f.add("Atender?", "n8n-nodes-base.if", 2.2, cond("={{ $json.rota }}", "equals", "atender"))
@@ -392,12 +399,17 @@ f.add("Salvar lead", "n8n-nodes-base.postgres", 2.8,
           "estado = COALESCE(d.estado, l.estado), reserva_uid = COALESCE(d.reserva_uid, l.reserva_uid), "
           "reserva_inicio = COALESCE(d.reserva_inicio::timestamptz, l.reserva_inicio), "
           "reserva_status = COALESCE(d.reserva_status, l.reserva_status), "
+          "reserva_link = COALESCE(d.reserva_link, l.reserva_link), "
+          "reserva_criada_em = COALESCE(d.reserva_criada_em::timestamptz, l.reserva_criada_em), "
+          "lembrete_8h_em = CASE WHEN d.reserva_inicio IS NOT NULL THEN NULL ELSE l.lembrete_8h_em END, "
+          "lembrete_1h_em = CASE WHEN d.reserva_inicio IS NOT NULL THEN NULL ELSE l.lembrete_1h_em END, "
+          "lembrete_15m_em = CASE WHEN d.reserva_inicio IS NOT NULL THEN NULL ELSE l.lembrete_15m_em END, "
           "atendimento_humano = l.atendimento_humano OR $3::boolean, pediu_parada = l.pediu_parada OR $4::boolean, "
           "atualizado_em = now() "
           "FROM jsonb_to_record($2::jsonb) AS d(nome text, email text, telefone_preferencial text, "
           "contato_avisos_confirmado text, perfil text, objetivo text, experiencia text, problema text, interesse text, "
           "ementa text, sabe_programar text, duvidas_pendentes text, preferencia_agenda text, estado text, "
-          "reserva_uid text, reserva_inicio text, reserva_status text) "
+          "reserva_uid text, reserva_inicio text, reserva_status text, reserva_link text, reserva_criada_em text) "
           "WHERE l.jid = $1 RETURNING l.*",
           "={{ [$json.jid, JSON.stringify($json.lead), $json.humano, $json.parada] }}"),
       creds=CRED["postgres"])
@@ -436,6 +448,77 @@ f.link("Claude", "Agente", kind="ai_languageModel")
 f.link("Memória da conversa", "Agente", kind="ai_memory")
 f.link("Avisar Willian?", "Resumo para o Willian", 0)
 f.chain("Resumo para o Willian", "Enviar resumo", "Registrar envio do resumo")
+
+
+# ---------------------------------------------------------------- Reminders
+LEMBRETES_SQL = (
+    "SELECT * FROM (SELECT jid, nome, reserva_uid, reserva_inicio, reserva_link, "
+    "CASE "
+    "WHEN lembrete_15m_em IS NULL AND now() >= reserva_inicio - interval '15 minutes' AND now() < reserva_inicio + interval '5 minutes' THEN '15m' "
+    "WHEN lembrete_1h_em IS NULL AND now() >= reserva_inicio - interval '60 minutes' AND now() < reserva_inicio - interval '15 minutes' THEN '1h' "
+    "WHEN lembrete_8h_em IS NULL "
+    "AND (now() AT TIME ZONE 'America/Sao_Paulo')::date = (reserva_inicio AT TIME ZONE 'America/Sao_Paulo')::date "
+    "AND (now() AT TIME ZONE 'America/Sao_Paulo')::time >= time '08:00' AND now() < reserva_inicio - interval '70 minutes' "
+    "AND (reserva_criada_em IS NULL OR (reserva_criada_em AT TIME ZONE 'America/Sao_Paulo') < "
+    "((reserva_inicio AT TIME ZONE 'America/Sao_Paulo')::date + time '08:00')) THEN '8h' "
+    "END AS tipo FROM leads WHERE reserva_status = 'reservado' AND reserva_inicio > now() - interval '10 minutes') x "
+    "WHERE tipo IS NOT NULL"
+)
+
+SEND_REMINDERS = r"""
+// Checks each booking on Cal.com, then sends the due reminder. Missed windows are skipped, never sent late.
+const MARKER = '⁣', TZ = 'America/Sao_Paulo';
+const cfg = $('Config lembretes').first().json;
+const h = { Authorization: 'Bearer ' + $env.CALCOM_API_KEY, 'cal-api-version': '2024-08-13' };
+const out = [];
+for (const it of $input.all()) {
+  const r = it.json;
+  if (!r.tipo) continue;
+  let b;
+  try { b = (await this.helpers.httpRequest({ url: `https://api.cal.com/v2/bookings/${r.reserva_uid}`, headers: h, json: true })).data; }
+  catch (e) { continue; }
+  if (!b || b.status !== 'accepted') { out.push({ json: { jid: r.jid, tipo: 'cancelado' } }); continue; }
+  if (new Date(b.start).getTime() !== new Date(r.reserva_inicio).getTime()) { out.push({ json: { jid: r.jid, tipo: 'novo_inicio', inicio: b.start } }); continue; }
+  const link = b.meetingUrl || r.reserva_link || '';
+  const hora = new Date(b.start).toLocaleTimeString('pt-BR', { timeZone: TZ, hour: '2-digit', minute: '2-digit' });
+  const nome = r.nome ? ', ' + r.nome : '';
+  const textos = {
+    '8h': `Bom dia${nome}! Hoje, às ${hora} (horário de Brasília), é o seu encontro de 30 minutos com o Willian. Você confirma sua presença?`,
+    '1h': `Olá${nome}! Falta 1 hora para o seu encontro com o Willian, às ${hora}. Separe suas dúvidas e uma visão geral da rotina que você quer melhorar. Daqui a pouco envio o link por aqui.`,
+    '15m': `Seu encontro com o Willian começa em 15 minutos, às ${hora}.` + (link ? ` Acesse por aqui: ${link}` : ' O link está no convite.'),
+  };
+  const texto = textos[r.tipo];
+  try {
+    await this.helpers.httpRequest({ method: 'POST', url: `${$env.EVOLUTION_URL}/message/sendText/${cfg.instancia}`,
+      headers: { apikey: $env.EVOLUTION_API_KEY }, json: true, body: { number: r.jid, text: texto + MARKER } });
+    out.push({ json: { jid: r.jid, tipo: r.tipo, texto } });
+  } catch (e) {}
+}
+return out;
+"""
+
+lb = Flow("Lembretes de encontro")
+lb.add("A cada 5 minutos", "n8n-nodes-base.scheduleTrigger", 1.2,
+       {"rule": {"interval": [{"field": "minutes", "minutesInterval": 5}]}})
+lb.add("Config lembretes", "n8n-nodes-base.postgres", 2.8,
+       sql("SELECT COALESCE(MAX(valor) FILTER (WHERE chave='instancia'),'atendimento') AS instancia FROM config", ""),
+       creds=CRED["postgres"], executeOnce=True)
+lb.add("Lembretes devidos", "n8n-nodes-base.postgres", 2.8, sql(LEMBRETES_SQL, ""), creds=CRED["postgres"],
+       alwaysOutputData=False)
+lb.add("Conferir e enviar", "n8n-nodes-base.code", 2, code(SEND_REMINDERS))
+lb.add("Registrar lembrete", "n8n-nodes-base.postgres", 2.8,
+       sql("UPDATE leads SET "
+           "lembrete_8h_em = CASE WHEN $2 = '8h' THEN now() ELSE lembrete_8h_em END, "
+           "lembrete_1h_em = CASE WHEN $2 = '1h' THEN now() ELSE lembrete_1h_em END, "
+           "lembrete_15m_em = CASE WHEN $2 = '15m' THEN now() ELSE lembrete_15m_em END, "
+           "ultimo_lembrete = CASE WHEN $2 IN ('8h', '1h', '15m') THEN $3 ELSE ultimo_lembrete END, "
+           "reserva_status = CASE WHEN $2 = 'cancelado' THEN 'cancelado' ELSE reserva_status END, "
+           "estado = CASE WHEN $2 = 'cancelado' THEN 'cancelado' ELSE estado END, "
+           "reserva_inicio = CASE WHEN $2 = 'novo_inicio' THEN $4::timestamptz ELSE reserva_inicio END, "
+           "atualizado_em = now() WHERE jid = $1",
+           "={{ [$json.jid, $json.tipo, $json.texto || null, $json.inicio || null] }}"),
+       creds=CRED["postgres"])
+lb.chain("A cada 5 minutos", "Config lembretes", "Lembretes devidos", "Conferir e enviar", "Registrar lembrete")
 
 # ---------------------------------------------------------------- QR page
 PAGE = r"""<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
@@ -532,6 +615,6 @@ for i, (path, method, kind) in enumerate([("conectar", "GET", "page"), ("conecta
     q.link(ok, deny, 1)
 
 OUT.mkdir(parents=True, exist_ok=True)
-for flow, fname in [(f, "atendimento-whatsapp.json"), (q, "pagina-qrcode.json")]:
+for flow, fname in [(f, "atendimento-whatsapp.json"), (lb, "lembretes.json"), (q, "pagina-qrcode.json")]:
     (OUT / fname).write_text(json.dumps(flow.json(), ensure_ascii=False, indent=2))
     print("ok", OUT / fname, len(flow.nodes), "nós")

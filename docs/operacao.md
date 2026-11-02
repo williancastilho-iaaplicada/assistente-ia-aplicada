@@ -29,6 +29,8 @@ O modo é lido a cada mensagem: muda na hora, sem reiniciar nada.
 - O bot lê os horários livres do Cal.com (que já desconta os compromissos do seu Google Calendar), oferece até 3 opções e reserva, remarca ou cancela pelo WhatsApp. O Cal.com envia o convite e cria o evento no Google Calendar.
 - Seus horários de atendimento, antecedência mínima, intervalo entre reuniões e limite de dias ficam no Cal.com: Disponibilidade e aba Limites do evento.
 - O evento usado é o da chave `calcom_evento` na tabela `config` (padrão `30min`).
+- Sem e-mail do contato, a reserva usa o endereço da chave `email_sem_convite` (tabela `config`) e o link vai na conversa.
+- Lembretes automáticos (fluxo "Lembretes de encontro", a cada 5 minutos): às 8h do dia pedindo confirmação de presença, 1 hora antes para se preparar e 15 minutos antes com o link. Antes de cada envio o fluxo confere no Cal.com se a reserva continua ativa e no mesmo horário; lembrete atrasado não é enviado.
 - A chave fica em `CALCOM_API_KEY` no `.env` da VPS. Para trocar: `~/projetos/chatbot-infra/salvar-chave.sh CALCOM_API_KEY` e depois `python3 infra/deploy.py update-n8n`.
 
 ### Trocar de número (ex.: Guilherme)
@@ -59,7 +61,7 @@ n8n and Evolution URLs above. The QR Code page URL needs `QR_PAGE_TOKEN`, which 
 Mode, notification number and `#bot` hand-back are described in the table above. The mode is read on every message, so changes apply immediately. Prompt changes: edit `prompt/` or the private base and run `n8n/publicar.sh`.
 
 ### Scheduling (Cal.com)
-The bot reads free slots from Cal.com (which already excludes Google Calendar events), offers up to 3 options and books, reschedules or cancels over WhatsApp; Cal.com sends the invite and creates the Google Calendar event. Hours, notice, buffers and booking window are set in Cal.com. The event slug is `calcom_evento` in `config`; the key is `CALCOM_API_KEY` in the VPS `.env`.
+The bot reads free slots from Cal.com (which already excludes Google Calendar events), offers up to 3 options and books, reschedules or cancels over WhatsApp; Cal.com sends the invite and creates the Google Calendar event. Hours, notice, buffers and booking window are set in Cal.com. Without an email, bookings use `email_sem_convite` from `config` and the link goes to the chat. Reminders run every 5 minutes: 8am on the day (attendance confirmation), 1 hour before (prep) and 15 minutes before (link), each checked against Cal.com first; late reminders are skipped. The event slug is `calcom_evento` in `config`; the key is `CALCOM_API_KEY` in the VPS `.env`.
 
 ### Changing numbers
 Open the QR Code page, disconnect the current number if any, scan with the new phone, then set the mode.

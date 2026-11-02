@@ -38,3 +38,13 @@ INSERT INTO config (chave, valor) VALUES ('calcom_evento', '30min') ON CONFLICT 
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS reserva_uid text;
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS reserva_inicio timestamptz;
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS reserva_status text;
+
+-- Booking extras and day-of reminders (08:00, 1 hour and 15 minutes before).
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS reserva_link text;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS reserva_criada_em timestamptz;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS lembrete_8h_em timestamptz;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS lembrete_1h_em timestamptz;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS lembrete_15m_em timestamptz;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS ultimo_lembrete text;
+-- Address used by Cal.com when the contact gives no email (the link goes to the chat instead).
+INSERT INTO config (chave, valor) VALUES ('email_sem_convite', 'willianpcastilho+whatsapp@outlook.com') ON CONFLICT (chave) DO NOTHING;
