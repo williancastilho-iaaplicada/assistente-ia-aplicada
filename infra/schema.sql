@@ -32,3 +32,9 @@ CREATE TABLE IF NOT EXISTS leads (
   atualizado_em timestamptz NOT NULL DEFAULT now()
 );
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS sabe_programar text;
+
+-- Agenda (Cal.com). The event slug is configurable; no ids hardcoded in the flow.
+INSERT INTO config (chave, valor) VALUES ('calcom_evento', '30min') ON CONFLICT (chave) DO NOTHING;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS reserva_uid text;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS reserva_inicio timestamptz;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS reserva_status text;

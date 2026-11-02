@@ -153,17 +153,50 @@ return out;
 """
 
 BUILD_INPUT = r"""
-// Joins buffered messages and adds the lead context for the agent.
+// Joins buffered messages and adds the lead context and Willian's free slots (Cal.com) for the agent.
 const lead = $('Lead').first().json;
-const base = $('Lead').first().json;
-const parts = [].concat($json.buffer || []).filter(Boolean);
-const agora = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', dateStyle: 'full', timeStyle: 'short' });
+const parts = [].concat($('Ler buffer').first().json.buffer || []).filter(Boolean);
+const TZ = 'America/Sao_Paulo';
+const agora = new Date().toLocaleString('pt-BR', { timeZone: TZ, dateStyle: 'full', timeStyle: 'short' });
 const conhecido = {};
 for (const [k, v] of Object.entries(lead)) {
   if (v !== null && v !== '' && !['criado_em', 'atualizado_em', 'atendimento_humano'].includes(k)) conhecido[k] = v;
 }
-const texto = `[contexto]\nAgora: ${agora} (horário de Brasília)\nDados registrados do lead: ${JSON.stringify(conhecido)}\n[/contexto]\n\n${parts.join('\n')}`;
-return [{ json: { sessionId: 'mem:' + base.jid, chatInput: texto, jid: base.jid } }];
+let agenda = 'Agenda indisponível no momento: não ofereça horários; registre a preferência de dia e período.';
+let eventTypeId = null;
+try {
+  const cfg = $('Config').first().json;
+  const h = { Authorization: 'Bearer ' + $env.CALCOM_API_KEY };
+  const et = await this.helpers.httpRequest({ url: 'https://api.cal.com/v2/event-types',
+    headers: { ...h, 'cal-api-version': '2024-06-14' }, json: true });
+  const ev = (et.data || []).find(e => e.slug === (cfg.calcom_evento || '30min'));
+  if (ev) {
+    eventTypeId = ev.id;
+    const dia = d => d.toISOString().slice(0, 10);
+    const ini = new Date(), fim = new Date(Date.now() + 14 * 864e5);
+    const sl = await this.helpers.httpRequest({ url: `https://api.cal.com/v2/slots?eventTypeId=${ev.id}&start=${dia(ini)}&end=${dia(fim)}&timeZone=${TZ}`,
+      headers: { ...h, 'cal-api-version': '2024-09-04' }, json: true });
+    const linhas = [];
+    for (const [d, lista] of Object.entries(sl.data || {}).slice(0, 10)) {
+      const hs = lista.map(x => x.start.slice(11, 16));
+      const faixas = [];
+      for (const hh of hs) {
+        const [H, M] = hh.split(':').map(Number);
+        const last = faixas[faixas.length - 1];
+        const prev = last && last[1].split(':').map(Number);
+        if (last && (H * 60 + M) - (prev[0] * 60 + prev[1]) === ev.lengthInMinutes) last[1] = hh;
+        else faixas.push([hh, hh]);
+      }
+      const nomeDia = new Date(d + 'T12:00:00-03:00').toLocaleDateString('pt-BR', { timeZone: TZ, weekday: 'short', day: '2-digit', month: '2-digit' });
+      linhas.push(`${nomeDia} (${d}): início às ` + faixas.map(f => f[0] === f[1] ? f[0] : `${f[0]}–${f[1]}`).join(', '));
+    }
+    agenda = linhas.length
+      ? `Horários livres para o encontro de ${ev.lengthInMinutes} min (horário de Brasília; inícios a cada ${ev.lengthInMinutes} min dentro de cada faixa):\n` + linhas.join('\n')
+      : 'Sem horários livres nos próximos 14 dias: registre a preferência de dia e período e encaminhe ao Willian.';
+  }
+} catch (e) {}
+const texto = `[contexto]\nAgora: ${agora} (horário de Brasília)\nDados registrados do lead: ${JSON.stringify(conhecido)}\n${agenda}\n[/contexto]\n\n${parts.join('\n')}`;
+return [{ json: { sessionId: 'mem:' + lead.jid, chatInput: texto, jid: lead.jid, eventTypeId } }];
 """
 
 PARSE_OUTPUT = r"""
@@ -177,21 +210,26 @@ const allowed = ['nome', 'email', 'telefone_preferencial', 'contato_avisos_confi
   'experiencia', 'problema', 'interesse', 'ementa', 'sabe_programar', 'duvidas_pendentes', 'preferencia_agenda', 'estado'];
 const lead = {};
 for (const k of allowed) if (parsed.lead && parsed.lead[k] != null && parsed.lead[k] !== '') lead[k] = String(parsed.lead[k]).slice(0, 500);
-const acoes = ['nenhuma', 'encaminhar_humano', 'registrar_preferencia_agenda', 'parar_acompanhamento'];
+const acoes = ['nenhuma', 'encaminhar_humano', 'registrar_preferencia_agenda', 'parar_acompanhamento',
+  'reservar', 'remarcar', 'cancelar_reserva'];
 const acao = acoes.includes(parsed.acao) ? parsed.acao : 'nenhuma';
 if (acao === 'encaminhar_humano') lead.estado = 'atendimento_humano';
 if (acao === 'parar_acompanhamento') lead.estado = 'acompanhamento_encerrado';
 const resposta = (resp || raw.replace(/<dados>[\s\S]*<\/dados>/, '')).trim();
-return [{ json: { jid: $('Montar entrada').first().json.jid, resposta, lead, acao,
+const inicio = parsed.agenda && parsed.agenda.inicio ? String(parsed.agenda.inicio) : null;
+return [{ json: { jid: $('Montar entrada').first().json.jid, resposta, lead, acao, inicio,
   humano: acao === 'encaminhar_humano', parada: acao === 'parar_acompanhamento' } }];
 """
 
 SUMMARY = r"""
 // Builds the internal summary for Willian (knowledge base, section 9).
 const l = $('Salvar lead').first().json;
-const p = $('Interpretar resposta').first().json;
+const p = $('Executar agenda').first().json;
 const v = (x, d = 'não informado') => (x === null || x === undefined || x === '') ? d : x;
-const motivo = p.acao === 'encaminhar_humano' ? 'Pedido de atendimento humano' : 'Pedido de encontro de 30 minutos';
+const motivos = { encaminhar_humano: 'Pedido de atendimento humano', registrar_preferencia_agenda: 'Pedido de encontro (sem horário reservado)',
+  reservar: 'Encontro reservado', remarcar: 'Encontro remarcado', cancelar_reserva: 'Encontro cancelado' };
+const motivo = motivos[p.acao] || 'Atualização do atendimento';
+const quando = l.reserva_inicio ? new Date(l.reserva_inicio).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
 const texto = [
   `*${motivo}*`,
   `Nome: ${v(l.nome)}`,
@@ -204,12 +242,66 @@ const texto = [
   `Principal Gargalo/Rotina: ${v(l.problema)}`,
   `Interesse Identificado: ${v(l.interesse, 'indefinido')}`,
   `Status da Ementa: ${v(l.ementa, 'não solicitada')}`,
-  `Status da Agenda: Pendente de horário${l.preferencia_agenda ? ' (preferência: ' + l.preferencia_agenda + ')' : ''}`,
-  `Próximo Passo: ${p.acao === 'encaminhar_humano' ? 'responder o contato (bot pausado para ele; mande #bot na conversa para devolver)' : 'confirmar o horário com o contato'}`,
+  `Status da Agenda: ${l.reserva_status === 'reservado' ? 'Reservado em ' + quando : l.reserva_status === 'cancelado' ? 'Cancelado' : 'Pendente de horário'}${l.preferencia_agenda ? ' (preferência: ' + l.preferencia_agenda + ')' : ''}`,
+  `Próximo Passo: ${p.acao === 'encaminhar_humano' ? 'responder o contato (bot pausado para ele; mande #bot na conversa para devolver)' : (p.acao === 'registrar_preferencia_agenda' ? 'confirmar o horário com o contato' : 'nenhuma ação necessária; o convite saiu pelo Cal.com')}`,
 ].join('\n');
 const cfg = $('Config').first().json;
 const destino = cfg.notificar_numero || $('Filtrar entrada').first().json.owner;
 return [{ json: { destino, texto } }];
+"""
+
+
+AGENDA = r"""
+// Books, reschedules or cancels on Cal.com. Only a confirmed API result produces a confirmation message.
+const p = $json;
+const out = { ...p, lead: { ...p.lead }, avisar: ['encaminhar_humano', 'registrar_preferencia_agenda'].includes(p.acao) };
+if (!['reservar', 'remarcar', 'cancelar_reserva'].includes(p.acao)) return [{ json: out }];
+const TZ = 'America/Sao_Paulo';
+const lead = { ...$('Lead').first().json, ...p.lead };
+const eventTypeId = $('Montar entrada').first().json.eventTypeId;
+const h = { Authorization: 'Bearer ' + $env.CALCOM_API_KEY, 'cal-api-version': '2024-08-13' };
+const quando = iso => new Date(iso).toLocaleString('pt-BR', { timeZone: TZ, weekday: 'long', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+const falha = 'Não consegui concluir a reserva desse horário. Posso consultar novas opções ou encaminhar seu pedido ao Willian.';
+try {
+  if (p.acao === 'cancelar_reserva') {
+    if (!lead.reserva_uid) throw new Error('sem reserva');
+    await this.helpers.httpRequest({ method: 'POST', url: `https://api.cal.com/v2/bookings/${lead.reserva_uid}/cancel`, headers: h,
+      body: { cancellationReason: 'Cancelado pelo contato no WhatsApp' }, json: true });
+    out.lead.reserva_status = 'cancelado'; out.lead.estado = 'cancelado';
+    out.resposta = 'Pronto, cancelei o seu encontro com o Willian. Se quiser marcar outro horário, é só me avisar por aqui.';
+    out.avisar = true;
+    return [{ json: out }];
+  }
+  if (!p.inicio || isNaN(new Date(p.inicio))) throw new Error('sem horário');
+  if (!lead.email) { out.resposta = 'Para enviar o convite, qual e-mail você prefere usar?'; out.acao = 'nenhuma'; return [{ json: out }]; }
+  let r;
+  if (p.acao === 'remarcar' && lead.reserva_uid && lead.reserva_status === 'reservado') {
+    r = await this.helpers.httpRequest({ method: 'POST', url: `https://api.cal.com/v2/bookings/${lead.reserva_uid}/reschedule`, headers: h,
+      body: { start: new Date(p.inicio).toISOString(), reschedulingReason: 'Remarcado pelo contato no WhatsApp' }, json: true });
+  } else {
+    if (lead.reserva_uid && lead.reserva_status === 'reservado' && new Date(lead.reserva_inicio) > new Date()) {
+      out.resposta = `Você já tem um encontro marcado para ${quando(lead.reserva_inicio)} (horário de Brasília). Quer remarcar para outro horário?`;
+      out.acao = 'nenhuma'; return [{ json: out }];
+    }
+    const fone = String(lead.telefone_preferencial || lead.telefone_origem || '').replace(/\D/g, '');
+    r = await this.helpers.httpRequest({ method: 'POST', url: 'https://api.cal.com/v2/bookings', headers: h, json: true, body: {
+      start: new Date(p.inicio).toISOString(), eventTypeId,
+      attendee: { name: lead.nome || 'Contato WhatsApp', email: lead.email, timeZone: TZ, language: 'pt', ...(fone ? { phoneNumber: '+' + fone } : {}) },
+      metadata: { origem: 'whatsapp' } } });
+  }
+  const b = r.data || {};
+  out.lead.reserva_uid = b.uid; out.lead.reserva_inicio = b.start; out.lead.reserva_status = 'reservado'; out.lead.estado = 'reservado';
+  const link = b.meetingUrl || (typeof b.location === 'string' && b.location.startsWith('http') ? b.location : '');
+  out.resposta = [
+    `Combinado, ${lead.nome || ''}! ${p.acao === 'remarcar' ? 'Remarquei para' : 'Marcado para'} ${quando(b.start)} (horário de Brasília). Seu encontro com o Willian terá 30 minutos e o convite foi enviado para ${lead.email}.`.replace(' , ', ' '),
+    link ? `Acesso: ${link}` : 'O link de acesso está no convite.',
+    'Traga suas dúvidas e uma visão geral da rotina que deseja melhorar. Se precisar remarcar, é só avisar por aqui!',
+  ].join('\n\n');
+  out.avisar = true;
+} catch (e) {
+  out.resposta = falha; out.acao = 'nenhuma'; out.avisar = false;
+}
+return [{ json: out }];
 """
 
 f = Flow("Atendimento WhatsApp")
@@ -219,7 +311,8 @@ f.add("Filtrar entrada", "n8n-nodes-base.code", 2, code(PRE_FILTER))
 f.add("Config", "n8n-nodes-base.postgres", 2.8,
       sql("SELECT COALESCE(MAX(valor) FILTER (WHERE chave='modo'),'self_only') AS modo, "
           "COALESCE(MAX(valor) FILTER (WHERE chave='instancia'),'atendimento') AS instancia, "
-          "COALESCE(MAX(valor) FILTER (WHERE chave='notificar_numero'),'') AS notificar_numero FROM config", ""),
+          "COALESCE(MAX(valor) FILTER (WHERE chave='notificar_numero'),'') AS notificar_numero, "
+          "COALESCE(MAX(valor) FILTER (WHERE chave='calcom_evento'),'30min') AS calcom_evento FROM config", ""),
       creds=CRED["postgres"], executeOnce=True)
 f.add("Aplicar modo", "n8n-nodes-base.code", 2, code(DECIDE))
 f.add("Atender?", "n8n-nodes-base.if", 2.2, cond("={{ $json.rota }}", "equals", "atender"))
@@ -274,7 +367,7 @@ f.add("Ler buffer", "n8n-nodes-base.redis", 1,
       creds=CRED["redis"])
 f.add("Limpar buffer", "n8n-nodes-base.redis", 1,
       {"operation": "delete", "key": "=buf:{{ $('Aplicar modo').item.json.jid }}"}, creds=CRED["redis"])
-f.add("Montar entrada", "n8n-nodes-base.code", 2, code(BUILD_INPUT.replace("$json.buffer", "$('Ler buffer').first().json.buffer")))
+f.add("Montar entrada", "n8n-nodes-base.code", 2, code(BUILD_INPUT))
 f.add("Agente", "@n8n/n8n-nodes-langchain.agent", 3.1,
       {"promptType": "define", "text": "={{ $json.chatInput }}", "options": {"systemMessage": PROMPT, "maxIterations": 3}})
 f.add("Claude", "@n8n/n8n-nodes-langchain.lmChatAnthropic", 1.6,
@@ -285,6 +378,7 @@ f.add("Memória da conversa", "@n8n/n8n-nodes-langchain.memoryRedisChat", 1.6,
       {"sessionIdType": "customKey", "sessionKey": "={{ $('Montar entrada').first().json.sessionId }}",
        "sessionTTL": MEMORY_TTL_SECONDS, "contextWindowLength": 20}, creds=CRED["redis"], pos=[f.x + 20, 520])
 f.add("Interpretar resposta", "n8n-nodes-base.code", 2, code(PARSE_OUTPUT))
+f.add("Executar agenda", "n8n-nodes-base.code", 2, code(AGENDA))
 f.add("Salvar lead", "n8n-nodes-base.postgres", 2.8,
       sql("UPDATE leads AS l SET nome = COALESCE(d.nome, l.nome), email = COALESCE(d.email, l.email), "
           "telefone_preferencial = COALESCE(d.telefone_preferencial, l.telefone_preferencial), "
@@ -295,23 +389,26 @@ f.add("Salvar lead", "n8n-nodes-base.postgres", 2.8,
           "sabe_programar = COALESCE(d.sabe_programar, l.sabe_programar), "
           "duvidas_pendentes = COALESCE(d.duvidas_pendentes, l.duvidas_pendentes), "
           "preferencia_agenda = COALESCE(d.preferencia_agenda, l.preferencia_agenda), "
-          "estado = COALESCE(d.estado, l.estado), "
+          "estado = COALESCE(d.estado, l.estado), reserva_uid = COALESCE(d.reserva_uid, l.reserva_uid), "
+          "reserva_inicio = COALESCE(d.reserva_inicio::timestamptz, l.reserva_inicio), "
+          "reserva_status = COALESCE(d.reserva_status, l.reserva_status), "
           "atendimento_humano = l.atendimento_humano OR $3::boolean, pediu_parada = l.pediu_parada OR $4::boolean, "
           "atualizado_em = now() "
           "FROM jsonb_to_record($2::jsonb) AS d(nome text, email text, telefone_preferencial text, "
           "contato_avisos_confirmado text, perfil text, objetivo text, experiencia text, problema text, interesse text, "
-          "ementa text, sabe_programar text, duvidas_pendentes text, preferencia_agenda text, estado text) "
+          "ementa text, sabe_programar text, duvidas_pendentes text, preferencia_agenda text, estado text, "
+          "reserva_uid text, reserva_inicio text, reserva_status text) "
           "WHERE l.jid = $1 RETURNING l.*",
           "={{ [$json.jid, JSON.stringify($json.lead), $json.humano, $json.parada] }}"),
       creds=CRED["postgres"])
 f.add("Enviar resposta", "n8n-nodes-base.httpRequest", 4.2,
-      evolution_send("$('Aplicar modo').first().json.jid", "$('Interpretar resposta').first().json.resposta"))
+      evolution_send("$('Aplicar modo').first().json.jid", "$('Executar agenda').first().json.resposta"))
 f.add("Registrar envio", "n8n-nodes-base.redis", 1,
       {"operation": "set", "key": "=sent:{{ $json.key.id }}", "value": "1", "keyType": "string", "expire": True, "ttl": SENT_TTL_SECONDS},
       creds=CRED["redis"])
 f.add("Avisar Willian?", "n8n-nodes-base.if", 2.2,
       {"conditions": {"options": {"caseSensitive": True, "leftValue": "", "typeValidation": "loose", "version": 2},
-                      "conditions": [{"id": "a1", "leftValue": "={{ ['encaminhar_humano', 'registrar_preferencia_agenda'].includes($('Interpretar resposta').first().json.acao) }}",
+                      "conditions": [{"id": "a1", "leftValue": "={{ $('Executar agenda').first().json.avisar }}",
                                       "operator": {"type": "boolean", "operation": "true", "singleValue": True}}],
                       "combinator": "and"}, "options": {}})
 f.add("Resumo para o Willian", "n8n-nodes-base.code", 2, code(SUMMARY))
@@ -333,7 +430,7 @@ f.chain("Recuperar áudio", "Transcrever áudio", "Texto do áudio", "Guardar no
 f.link("Texto da mensagem", "Guardar no buffer")
 f.chain("Guardar no buffer", "Marcar última mensagem", "Aguardar mensagens picadas", "Ler última mensagem", "É a mais recente?")
 f.link("É a mais recente?", "Ler buffer", 0)
-f.chain("Ler buffer", "Limpar buffer", "Montar entrada", "Agente", "Interpretar resposta", "Salvar lead",
+f.chain("Ler buffer", "Limpar buffer", "Montar entrada", "Agente", "Interpretar resposta", "Executar agenda", "Salvar lead",
         "Enviar resposta", "Registrar envio", "Avisar Willian?")
 f.link("Claude", "Agente", kind="ai_languageModel")
 f.link("Memória da conversa", "Agente", kind="ai_memory")
