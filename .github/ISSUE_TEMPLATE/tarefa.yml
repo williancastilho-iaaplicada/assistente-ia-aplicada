@@ -1,0 +1,24 @@
+name: "📌 Tarefa / Task"
+description: "Algo a construir ou melhorar / Something to build or improve"
+labels: ["tipo:feature"]
+body:
+  - type: textarea
+    id: objetivo
+    attributes:
+      label: "🎯 Objetivo / Goal"
+      description: "🇧🇷 O que precisa existir e por quê (PT-BR e EN). / 🇺🇸 What needs to exist and why."
+    validations:
+      required: true
+  - type: textarea
+    id: aceite
+    attributes:
+      label: "✅ Critérios de aceite / Acceptance criteria"
+      value: |
+        - [ ] 
+    validations:
+      required: true
+  - type: textarea
+    id: contexto
+    attributes:
+      label: "📎 Contexto / Context"
+      description: "Spec, plano, links / Spec, plan, links"
