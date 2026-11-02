@@ -287,9 +287,12 @@ try {
       out.acao = 'nenhuma'; return [{ json: out }];
     }
     const fone = String(lead.telefone_preferencial || lead.telefone_origem || '').replace(/\D/g, '');
+    // Name and phone go into the attendee name so they show up in the calendar event title.
+    const foneBR = fone.length === 13 && fone.startsWith('55') ? `+55 ${fone.slice(2, 4)} ${fone.slice(4, 9)}-${fone.slice(9)}` : (fone ? '+' + fone : '');
+    const nomeTitulo = [lead.nome || 'Contato WhatsApp', foneBR].filter(Boolean).join(' · ');
     r = await this.helpers.httpRequest({ method: 'POST', url: 'https://api.cal.com/v2/bookings', headers: h, json: true, body: {
       start: new Date(p.inicio).toISOString(), eventTypeId,
-      attendee: { name: lead.nome || 'Contato WhatsApp', email: emailReserva, timeZone: TZ, language: 'pt', ...(fone ? { phoneNumber: '+' + fone } : {}) },
+      attendee: { name: nomeTitulo, email: emailReserva, timeZone: TZ, language: 'pt', ...(fone ? { phoneNumber: '+' + fone } : {}) },
       metadata: { origem: 'whatsapp' } } });
   }
   const b = r.data || {};
