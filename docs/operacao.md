@@ -25,6 +25,12 @@
 
 O modo é lido a cada mensagem: muda na hora, sem reiniciar nada.
 
+### Agenda (Cal.com)
+- O bot lê os horários livres do Cal.com (que já desconta os compromissos do seu Google Calendar), oferece até 3 opções e reserva, remarca ou cancela pelo WhatsApp. O Cal.com envia o convite e cria o evento no Google Calendar.
+- Seus horários de atendimento, antecedência mínima, intervalo entre reuniões e limite de dias ficam no Cal.com: Disponibilidade e aba Limites do evento.
+- O evento usado é o da chave `calcom_evento` na tabela `config` (padrão `30min`).
+- A chave fica em `CALCOM_API_KEY` no `.env` da VPS. Para trocar: `~/projetos/chatbot-infra/salvar-chave.sh CALCOM_API_KEY` e depois `python3 infra/deploy.py update-n8n`.
+
 ### Trocar de número (ex.: Guilherme)
 1. Abra a página de conexão. Se houver um número conectado, clique em "Desconectar / trocar número".
 2. No celular novo: WhatsApp → Configurações → Dispositivos conectados → Conectar dispositivo → aponte para o QR Code.
@@ -51,6 +57,9 @@ n8n and Evolution URLs above. The QR Code page URL needs `QR_PAGE_TOKEN`, which 
 
 ### Daily tasks
 Mode, notification number and `#bot` hand-back are described in the table above. The mode is read on every message, so changes apply immediately. Prompt changes: edit `prompt/` or the private base and run `n8n/publicar.sh`.
+
+### Scheduling (Cal.com)
+The bot reads free slots from Cal.com (which already excludes Google Calendar events), offers up to 3 options and books, reschedules or cancels over WhatsApp; Cal.com sends the invite and creates the Google Calendar event. Hours, notice, buffers and booking window are set in Cal.com. The event slug is `calcom_evento` in `config`; the key is `CALCOM_API_KEY` in the VPS `.env`.
 
 ### Changing numbers
 Open the QR Code page, disconnect the current number if any, scan with the new phone, then set the mode.
