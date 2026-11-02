@@ -70,12 +70,14 @@ n8n = {
     "EVOLUTION_API_KEY": env["EVOLUTION_API_KEY"], "EVOLUTION_URL": f"http://{P}_evolution:8080",
     "WEBHOOK_SECRET": env["WEBHOOK_SECRET"], "QR_PAGE_TOKEN": env["QR_PAGE_TOKEN"],
     "CALCOM_API_KEY": env.get("CALCOM_API_KEY", ""),
+    "GMAIL_USER": env.get("GMAIL_USER", ""),
     "EXECUTIONS_DATA_SAVE_ON_SUCCESS": "none", "EXECUTIONS_DATA_SAVE_ON_PROGRESS": "false",
     "CREDENTIALS_OVERWRITE_DATA": json.dumps({
         "anthropicApi": {"apiKey": env["ANTHROPIC_API_KEY"]},
         "openAiApi": {"apiKey": env["OPENAI_API_KEY"]},
         "postgres": {"host": f"{P}_db", "database": "chatbot", "user": "postgres", "password": PG, "port": 5432, "ssl": "disable"},
         "redis": {"host": f"{P}_redis", "port": 6379, "password": RD, "database": 0},
+        "smtp": {"user": env.get("GMAIL_USER", ""), "password": env.get("GMAIL_APP_PASSWORD", "")},
     }, separators=(",", ":")),
 }
 if MODE == "create":

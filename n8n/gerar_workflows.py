@@ -36,6 +36,7 @@ CRED = {
     "redis": {"redis": {"id": "chatbotRedis00001", "name": "Redis chatbot"}},
     "anthropic": {"anthropicApi": {"id": "chatbotAnthropic1", "name": "Anthropic chatbot"}},
     "openai": {"openAiApi": {"id": "chatbotOpenAi0001", "name": "OpenAI chatbot"}},
+    "smtp": {"smtp": {"id": "chatbotSmtpGmail1", "name": "Gmail briefing"}},
 }
 
 EVO_HEADERS = {"parameters": [{"name": "apikey", "value": "={{ $env.EVOLUTION_API_KEY }}"}]}
@@ -405,6 +406,8 @@ f.add("Salvar lead", "n8n-nodes-base.postgres", 2.8,
           "reserva_link = COALESCE(d.reserva_link, l.reserva_link), "
           "reserva_criada_em = COALESCE(d.reserva_criada_em::timestamptz, l.reserva_criada_em), "
           "lembrete_8h_em = CASE WHEN d.reserva_inicio IS NOT NULL THEN NULL ELSE l.lembrete_8h_em END, "
+          "briefing_reserva_em = CASE WHEN d.reserva_inicio IS NOT NULL THEN NULL ELSE l.briefing_reserva_em END, "
+          "briefing_1h_em = CASE WHEN d.reserva_inicio IS NOT NULL THEN NULL ELSE l.briefing_1h_em END, "
           "lembrete_1h_em = CASE WHEN d.reserva_inicio IS NOT NULL THEN NULL ELSE l.lembrete_1h_em END, "
           "lembrete_15m_em = CASE WHEN d.reserva_inicio IS NOT NULL THEN NULL ELSE l.lembrete_15m_em END, "
           "atendimento_humano = l.atendimento_humano OR $3::boolean, pediu_parada = l.pediu_parada OR $4::boolean, "
@@ -421,6 +424,11 @@ f.add("Enviar resposta", "n8n-nodes-base.httpRequest", 4.2,
 f.add("Registrar envio", "n8n-nodes-base.redis", 1,
       {"operation": "set", "key": "=sent:{{ $json.key.id }}", "value": "1", "keyType": "string", "expire": True, "ttl": SENT_TTL_SECONDS},
       creds=CRED["redis"])
+f.add("Registrar conversa", "n8n-nodes-base.postgres", 2.8,
+      sql("INSERT INTO mensagens (jid, direcao, texto) VALUES ($1, 'entrada', $2), ($1, 'saida', $3)",
+          "={{ [$('Lead').first().json.jid, [].concat($('Ler buffer').first().json.buffer || []).join('\\n'), "
+          "$('Executar agenda').first().json.resposta] }}"),
+      creds=CRED["postgres"])
 f.add("Avisar Willian?", "n8n-nodes-base.if", 2.2,
       {"conditions": {"options": {"caseSensitive": True, "leftValue": "", "typeValidation": "loose", "version": 2},
                       "conditions": [{"id": "a1", "leftValue": "={{ $('Executar agenda').first().json.avisar }}",
@@ -446,7 +454,7 @@ f.link("Texto da mensagem", "Guardar no buffer")
 f.chain("Guardar no buffer", "Marcar última mensagem", "Aguardar mensagens picadas", "Ler última mensagem", "É a mais recente?")
 f.link("É a mais recente?", "Ler buffer", 0)
 f.chain("Ler buffer", "Limpar buffer", "Montar entrada", "Agente", "Interpretar resposta", "Executar agenda", "Salvar lead",
-        "Enviar resposta", "Registrar envio", "Avisar Willian?")
+        "Enviar resposta", "Registrar envio", "Registrar conversa", "Avisar Willian?")
 f.link("Claude", "Agente", kind="ai_languageModel")
 f.link("Memória da conversa", "Agente", kind="ai_memory")
 f.link("Avisar Willian?", "Resumo para o Willian", 0)
@@ -510,7 +518,8 @@ lb.add("Lembretes devidos", "n8n-nodes-base.postgres", 2.8, sql(LEMBRETES_SQL, "
        alwaysOutputData=False)
 lb.add("Conferir e enviar", "n8n-nodes-base.code", 2, code(SEND_REMINDERS))
 lb.add("Registrar lembrete", "n8n-nodes-base.postgres", 2.8,
-       sql("UPDATE leads SET "
+       sql("WITH log AS (INSERT INTO mensagens (jid, direcao, texto) SELECT $1, 'saida', $3 WHERE $3 IS NOT NULL) "
+           "UPDATE leads SET "
            "lembrete_8h_em = CASE WHEN $2 = '8h' THEN now() ELSE lembrete_8h_em END, "
            "lembrete_1h_em = CASE WHEN $2 = '1h' THEN now() ELSE lembrete_1h_em END, "
            "lembrete_15m_em = CASE WHEN $2 = '15m' THEN now() ELSE lembrete_15m_em END, "
@@ -522,6 +531,78 @@ lb.add("Registrar lembrete", "n8n-nodes-base.postgres", 2.8,
            "={{ [$json.jid, $json.tipo, $json.texto || null, $json.inicio || null] }}"),
        creds=CRED["postgres"])
 lb.chain("A cada 5 minutos", "Config lembretes", "Lembretes devidos", "Conferir e enviar", "Registrar lembrete")
+
+
+# ---------------------------------------------------------------- Briefing by email
+BRIEFING_SQL = (
+    "SELECT * FROM (SELECT l.*, (SELECT valor FROM config WHERE chave = 'email_briefing') AS email_briefing, "
+    "CASE WHEN l.briefing_reserva_em IS NULL AND now() < l.reserva_inicio - interval '60 minutes' THEN 'reserva' "
+    "WHEN l.briefing_1h_em IS NULL AND now() >= l.reserva_inicio - interval '60 minutes' AND now() < l.reserva_inicio THEN '1h' END AS tipo_briefing, "
+    "(SELECT COALESCE(json_agg(json_build_object('direcao', m.direcao, 'texto', m.texto, "
+    "'em', to_char(m.criado_em AT TIME ZONE 'America/Sao_Paulo', 'DD/MM HH24:MI')) ORDER BY m.id), '[]'::json) "
+    "FROM (SELECT * FROM mensagens WHERE jid = l.jid ORDER BY id DESC LIMIT 80) m) AS conversa "
+    "FROM leads l WHERE l.reserva_status = 'reservado' AND l.reserva_inicio > now()) x "
+    "WHERE tipo_briefing IS NOT NULL AND COALESCE(email_briefing, '') <> ''"
+)
+
+BRIEF_REQUEST = r"""
+// Builds the Claude request that turns the lead profile and conversation into a meeting briefing.
+const l = $json;
+const perfil = {};
+for (const k of ['nome', 'email', 'telefone_origem', 'telefone_preferencial', 'perfil', 'objetivo', 'experiencia', 'sabe_programar',
+  'problema', 'interesse', 'ementa', 'duvidas_pendentes', 'preferencia_agenda', 'estado']) if (l[k]) perfil[k] = l[k];
+const conversa = (l.conversa || []).map(m => `[${m.em}] ${m.direcao === 'entrada' ? 'Contato' : 'Assistente'}: ${m.texto}`).join('\n');
+return { json: { body: {
+  model: 'MODEL_ID', max_tokens: 1200,
+  system: 'Você prepara o Willian Castilho (mentor de IA aplicada) para um encontro gratuito de 30 minutos com um lead que veio pelo WhatsApp. Escreva em português, direto, em tópicos curtos, só com fatos da conversa e do cadastro; quando algo não foi dito, escreva "não informado". Nunca invente.',
+  messages: [{ role: 'user', content: `Cadastro:\n${JSON.stringify(perfil, null, 1)}\n\nConversa:\n${conversa || '(sem mensagens registradas)'}\n\nResponda só com HTML simples (h3, p, ul, li, b), com estas seções: Quem é; Objetivo e contexto; Dores e rotina que quer melhorar; O que perguntou ou demonstrou interesse; Pontos de atenção; Sugestão de condução do encontro (3 a 5 tópicos).` }],
+} } };
+""".replace("MODEL_ID", MODEL)
+
+BRIEF_EMAIL = r"""
+// Assembles the briefing email: AI summary, profile table, meeting link and the full conversation.
+const l = $('Briefings devidos').item.json;
+const resumo = (($json.content || [])[0] || {}).text || '<p>(resumo indisponível)</p>';
+const esc = t => String(t ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+const quando = new Date(l.reserva_inicio).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', weekday: 'long', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+const campos = [['Nome', l.nome], ['Telefone', l.telefone_origem && '+' + l.telefone_origem], ['Telefone preferencial', l.telefone_preferencial],
+  ['E-mail', l.email], ['Perfil', l.perfil], ['Objetivo', l.objetivo], ['Experiência com IA', l.experiencia], ['Sabe programar', l.sabe_programar],
+  ['Gargalo / rotina', l.problema], ['Interesse', l.interesse], ['Ementa', l.ementa], ['Dúvidas pendentes', l.duvidas_pendentes], ['Estado', l.estado]];
+const tabela = campos.map(([k, v]) => `<tr><td style="padding:4px 8px;color:#555">${k}</td><td style="padding:4px 8px"><b>${esc(v || 'não informado')}</b></td></tr>`).join('');
+const conversa = (l.conversa || []).map(m => `<p style="margin:4px 0"><span style="color:#888">[${m.em}]</span> <b>${m.direcao === 'entrada' ? 'Contato' : 'Assistente'}:</b> ${esc(m.texto).replace(/\n/g, '<br>')}</p>`).join('');
+const titulo = l.tipo_briefing === '1h' ? 'Começa em 1 hora' : 'Nova reunião marcada';
+const html = `<div style="font-family:Arial,sans-serif;max-width:680px">
+<h2>${titulo}: ${esc(l.nome || 'Contato WhatsApp')}</h2>
+<p><b>Quando:</b> ${quando} (horário de Brasília)${l.reserva_link ? `<br><b>Link:</b> <a href="${l.reserva_link}">${l.reserva_link}</a>` : ''}</p>
+<h3>Briefing</h3>${resumo}
+<h3>Cadastro</h3><table style="border-collapse:collapse">${tabela}</table>
+<h3>Conversa completa</h3>${conversa || '<p>(sem mensagens registradas)</p>'}
+</div>`;
+return { json: { para: l.email_briefing, assunto: `[Briefing] ${titulo} · ${l.nome || 'Contato'} · ${quando}`, html, jid: l.jid, tipo: l.tipo_briefing } };
+"""
+
+br = Flow("Briefing por e-mail")
+br.add("A cada 5 minutos (briefing)", "n8n-nodes-base.scheduleTrigger", 1.2,
+       {"rule": {"interval": [{"field": "minutes", "minutesInterval": 5}]}})
+br.add("Briefings devidos", "n8n-nodes-base.postgres", 2.8, sql(BRIEFING_SQL, ""), creds=CRED["postgres"])
+br.add("Montar pedido", "n8n-nodes-base.code", 2, {"mode": "runOnceForEachItem", "language": "javaScript", "jsCode": BRIEF_REQUEST})
+br.add("Claude resume", "n8n-nodes-base.httpRequest", 4.2, {
+    "method": "POST", "url": "https://api.anthropic.com/v1/messages",
+    "authentication": "predefinedCredentialType", "nodeCredentialType": "anthropicApi",
+    "sendHeaders": True, "headerParameters": {"parameters": [{"name": "anthropic-version", "value": "2023-06-01"}]},
+    "sendBody": True, "specifyBody": "json", "jsonBody": "={{ JSON.stringify($json.body) }}", "options": {}},
+    creds=CRED["anthropic"])
+br.add("Montar e-mail", "n8n-nodes-base.code", 2, {"mode": "runOnceForEachItem", "language": "javaScript", "jsCode": BRIEF_EMAIL})
+br.add("Enviar e-mail", "n8n-nodes-base.emailSend", 2.1,
+       {"fromEmail": "={{ 'Assistente IA Aplicada <' + $env.GMAIL_USER + '>' }}", "toEmail": "={{ $json.para }}",
+        "subject": "={{ $json.assunto }}", "emailFormat": "html", "html": "={{ $json.html }}", "options": {}},
+       creds=CRED["smtp"])
+br.add("Registrar briefing", "n8n-nodes-base.postgres", 2.8,
+       sql("UPDATE leads SET briefing_reserva_em = CASE WHEN $2 = 'reserva' THEN now() ELSE briefing_reserva_em END, "
+           "briefing_1h_em = CASE WHEN $2 = '1h' THEN now() ELSE briefing_1h_em END WHERE jid = $1",
+           "={{ [$('Montar e-mail').item.json.jid, $('Montar e-mail').item.json.tipo] }}"),
+       creds=CRED["postgres"])
+br.chain("A cada 5 minutos (briefing)", "Briefings devidos", "Montar pedido", "Claude resume", "Montar e-mail", "Enviar e-mail", "Registrar briefing")
 
 # ---------------------------------------------------------------- QR page
 PAGE = r"""<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
@@ -618,6 +699,6 @@ for i, (path, method, kind) in enumerate([("conectar", "GET", "page"), ("conecta
     q.link(ok, deny, 1)
 
 OUT.mkdir(parents=True, exist_ok=True)
-for flow, fname in [(f, "atendimento-whatsapp.json"), (lb, "lembretes.json"), (q, "pagina-qrcode.json")]:
+for flow, fname in [(f, "atendimento-whatsapp.json"), (lb, "lembretes.json"), (br, "briefing-email.json"), (q, "pagina-qrcode.json")]:
     (OUT / fname).write_text(json.dumps(flow.json(), ensure_ascii=False, indent=2))
     print("ok", OUT / fname, len(flow.nodes), "nós")

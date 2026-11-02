@@ -31,8 +31,8 @@ O número do dono é lido de cada evento (`sender` da Evolution). Trocar de núm
 ### Dados e privacidade
 - A Evolution não guarda mensagens, contatos, conversas nem histórico.
 - O n8n não guarda execuções que deram certo; só as com erro, para diagnóstico.
-- O Postgres guarda só o perfil do lead (nome, e-mail, objetivo etc.), não as mensagens.
-- A memória da conversa fica no Redis por 7 dias.
+- O Postgres guarda o perfil do lead e a conversa completa (tabela `mensagens`), para o briefing e consulta do Willian pelo DbGate.
+- A memória curta do agente fica no Redis por 7 dias.
 - A base de conhecimento fica só na VPS (`~/projetos/chatbot-infra/conhecimento/`), fora do git.
 - Segredos ficam só em `~/projetos/chatbot-infra/.env` na VPS. As chaves de IA entram no n8n por `CREDENTIALS_OVERWRITE_DATA` e não aparecem na tela.
 
@@ -67,7 +67,7 @@ WhatsApp assistant running entirely on Willian's VPS, in an isolated Easypanel p
 The owner's number is read from each event. Changing numbers only requires scanning the QR Code again.
 
 ### Data and privacy
-Evolution stores no messages, contacts, chats or history; n8n keeps only failed executions; Postgres keeps only the lead profile; conversation memory lives in Redis for 7 days; the knowledge base and all secrets stay on the VPS, outside git.
+Evolution stores no messages, contacts, chats or history; n8n keeps only failed executions; Postgres keeps the lead profile and the full conversation (`mensagens`) for briefings and review via DbGate; the agent short-term memory lives in Redis for 7 days; the knowledge base and all secrets stay on the VPS, outside git.
 
 ### Files
 See the table above.
