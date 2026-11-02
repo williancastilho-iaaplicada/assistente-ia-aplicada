@@ -69,6 +69,8 @@ n8n = {
     "EXECUTIONS_DATA_PRUNE": "true", "EXECUTIONS_DATA_MAX_AGE": "168",
     "EVOLUTION_API_KEY": env["EVOLUTION_API_KEY"], "EVOLUTION_URL": f"http://{P}_evolution:8080",
     "WEBHOOK_SECRET": env["WEBHOOK_SECRET"], "QR_PAGE_TOKEN": env["QR_PAGE_TOKEN"],
+    "CALCOM_API_KEY": env.get("CALCOM_API_KEY", ""),
+    "RESEND_API_KEY": env.get("RESEND_API_KEY", ""), "RESEND_FROM": env.get("RESEND_FROM", ""),
     "EXECUTIONS_DATA_SAVE_ON_SUCCESS": "none", "EXECUTIONS_DATA_SAVE_ON_PROGRESS": "false",
     "CREDENTIALS_OVERWRITE_DATA": json.dumps({
         "anthropicApi": {"apiKey": env["ANTHROPIC_API_KEY"]},

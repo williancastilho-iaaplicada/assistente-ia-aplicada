@@ -32,3 +32,38 @@ CREATE TABLE IF NOT EXISTS leads (
   atualizado_em timestamptz NOT NULL DEFAULT now()
 );
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS sabe_programar text;
+
+-- Agenda (Cal.com). The event slug is configurable; no ids hardcoded in the flow.
+INSERT INTO config (chave, valor) VALUES ('calcom_evento', '30min') ON CONFLICT (chave) DO NOTHING;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS reserva_uid text;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS reserva_inicio timestamptz;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS reserva_status text;
+
+-- Booking extras and day-of reminders (08:00, 1 hour and 15 minutes before).
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS reserva_link text;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS reserva_criada_em timestamptz;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS lembrete_8h_em timestamptz;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS lembrete_1h_em timestamptz;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS lembrete_15m_em timestamptz;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS ultimo_lembrete text;
+-- Address used by Cal.com when the contact gives no email (the link goes to the chat instead).
+INSERT INTO config (chave, valor) VALUES ('email_sem_convite', 'willianpcastilho+whatsapp@outlook.com') ON CONFLICT (chave) DO NOTHING;
+
+-- Conversation history (both sides) for briefings and later review. Kept until deleted on request.
+CREATE TABLE IF NOT EXISTS mensagens (
+  id bigserial PRIMARY KEY,
+  jid text NOT NULL,
+  direcao text NOT NULL CHECK (direcao IN ('entrada', 'saida')),
+  texto text NOT NULL,
+  criado_em timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS mensagens_jid_idx ON mensagens (jid, id);
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS briefing_reserva_em timestamptz;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS briefing_1h_em timestamptz;
+-- Briefing recipient (set the real address directly in the database).
+INSERT INTO config (chave, valor) VALUES ('email_briefing', '') ON CONFLICT (chave) DO NOTHING;
+
+-- Email is asked only once; the flag keeps the agent from asking again.
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS email_solicitado boolean NOT NULL DEFAULT false;
+-- Syllabus summary sent with the booking confirmation (private text, set directly in the database).
+INSERT INTO config (chave, valor) VALUES ('ementa_resumo', '') ON CONFLICT (chave) DO NOTHING;
