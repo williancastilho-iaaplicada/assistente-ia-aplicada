@@ -1,0 +1,6 @@
+[
+ {"id":"chatbotPostgres01","name":"Postgres chatbot","type":"postgres","data":{"host":"chatbot_db","database":"chatbot","user":"postgres","password":"","port":5432,"ssl":"disable"}},
+ {"id":"chatbotRedis00001","name":"Redis chatbot","type":"redis","data":{"host":"chatbot_redis","port":6379,"password":"","database":0}},
+ {"id":"chatbotAnthropic1","name":"Anthropic chatbot","type":"anthropicApi","data":{"apiKey":""}},
+ {"id":"chatbotOpenAi0001","name":"OpenAI chatbot","type":"openAiApi","data":{"apiKey":""}}
+]

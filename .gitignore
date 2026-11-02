@@ -13,3 +13,8 @@ coverage/
 *.log
 .DS_Store
 .claude/settings.local.json
+
+# 🇧🇷 Dados privados do atendimento: ficam só na VPS. / 🇺🇸 Private assistant data: VPS only.
+conhecimento/
+n8n/workflows/
+openapi.json
