@@ -62,3 +62,8 @@ ALTER TABLE leads ADD COLUMN IF NOT EXISTS briefing_reserva_em timestamptz;
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS briefing_1h_em timestamptz;
 -- Briefing recipient (set the real address directly in the database).
 INSERT INTO config (chave, valor) VALUES ('email_briefing', '') ON CONFLICT (chave) DO NOTHING;
+
+-- Email is asked only once; the flag keeps the agent from asking again.
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS email_solicitado boolean NOT NULL DEFAULT false;
+-- Syllabus summary sent with the booking confirmation (private text, set directly in the database).
+INSERT INTO config (chave, valor) VALUES ('ementa_resumo', '') ON CONFLICT (chave) DO NOTHING;

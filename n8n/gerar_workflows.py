@@ -195,7 +195,12 @@ try {
       : 'Sem horários livres nos próximos 14 dias: registre a preferência de dia e período e encaminhe ao Willian.';
   }
 } catch (e) {}
-const texto = `[contexto]\nAgora: ${agora} (horário de Brasília)\nDados registrados do lead: ${JSON.stringify(conhecido)}\n${agenda}\n[/contexto]\n\n${parts.join('\n')}`;
+const perguntas = { objetivo: 'objetivo principal com IA', experiencia: 'como usa IA hoje', sabe_programar: 'se sabe programar',
+  problema: 'atividade repetitiva que mais consome tempo', interesse: 'interesse (mentoria em grupo, 1:1, in-company, implementação ou dúvida)' };
+const faltam = Object.keys(perguntas).filter(k => !lead[k]).map(k => perguntas[k]);
+const qualif = faltam.length ? `Qualificação pendente, nesta ordem: ${faltam.join('; ')}.` : 'Qualificação completa.';
+const emailInfo = lead.email ? '' : (lead.email_solicitado ? 'E-mail já foi pedido uma vez: não peça de novo.' : 'E-mail ainda não foi pedido.');
+const texto = `[contexto]\nAgora: ${agora} (horário de Brasília)\nDados registrados do lead: ${JSON.stringify(conhecido)}\n${qualif} ${emailInfo}\n${agenda}\n[/contexto]\n\n${parts.join('\n')}`;
 return [{ json: { sessionId: 'mem:' + lead.jid, chatInput: texto, jid: lead.jid, eventTypeId } }];
 """
 
@@ -207,7 +212,8 @@ const dados = (raw.match(/<dados>([\s\S]*?)<\/dados>/) || [])[1];
 let parsed = { lead: {}, acao: 'nenhuma' };
 try { if (dados) parsed = JSON.parse(dados.trim()); } catch (e) {}
 const allowed = ['nome', 'email', 'telefone_preferencial', 'contato_avisos_confirmado', 'perfil', 'objetivo',
-  'experiencia', 'problema', 'interesse', 'ementa', 'sabe_programar', 'duvidas_pendentes', 'preferencia_agenda', 'estado'];
+  'experiencia', 'problema', 'interesse', 'ementa', 'sabe_programar', 'duvidas_pendentes', 'preferencia_agenda', 'estado',
+  'email_solicitado'];
 const lead = {};
 for (const k of allowed) if (parsed.lead && parsed.lead[k] != null && parsed.lead[k] !== '') lead[k] = String(parsed.lead[k]).slice(0, 500);
 const acoes = ['nenhuma', 'encaminhar_humano', 'registrar_preferencia_agenda', 'parar_acompanhamento',
@@ -255,9 +261,21 @@ AGENDA = r"""
 // Books, reschedules or cancels on Cal.com. Only a confirmed API result produces a confirmation message.
 const p = $json;
 const out = { ...p, lead: { ...p.lead }, avisar: ['encaminhar_humano', 'registrar_preferencia_agenda'].includes(p.acao) };
-if (!['reservar', 'remarcar', 'cancelar_reserva'].includes(p.acao)) return [{ json: out }];
 const TZ = 'America/Sao_Paulo';
-const lead = { ...$('Lead').first().json, ...p.lead };
+const antes = $('Lead').first().json;
+const lead = { ...antes, ...p.lead };
+const cfg = $('Config').first().json;
+if (!['reservar', 'remarcar', 'cancelar_reserva'].includes(p.acao)) {
+  if (p.lead.email && !antes.email && antes.reserva_uid && antes.reserva_status === 'reservado' && new Date(antes.reserva_inicio) > new Date()) {
+    try {
+      await this.helpers.httpRequest({ method: 'POST', url: `https://api.cal.com/v2/bookings/${antes.reserva_uid}/guests`, json: true,
+        headers: { Authorization: 'Bearer ' + $env.CALCOM_API_KEY, 'cal-api-version': '2024-08-13' },
+        body: { guests: [{ email: p.lead.email, name: lead.nome || 'Convidado' }] } });
+      out.resposta = `${out.resposta}\n\nPronto, enviei o convite do encontro também para ${p.lead.email}.`.trim();
+    } catch (e) {}
+  }
+  return [{ json: out }];
+}
 const eventTypeId = $('Montar entrada').first().json.eventTypeId;
 const h = { Authorization: 'Bearer ' + $env.CALCOM_API_KEY, 'cal-api-version': '2024-08-13' };
 const quando = iso => new Date(iso).toLocaleString('pt-BR', { timeZone: TZ, weekday: 'long', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
@@ -273,7 +291,6 @@ try {
     return [{ json: out }];
   }
   if (!p.inicio || isNaN(new Date(p.inicio))) throw new Error('sem horário');
-  const cfg = $('Config').first().json;
   const semEmail = !lead.email;
   const emailReserva = lead.email || cfg.email_sem_convite;
   if (!emailReserva) throw new Error('sem e-mail');
@@ -299,11 +316,13 @@ try {
   const link = b.meetingUrl || (typeof b.location === 'string' && b.location.startsWith('http') ? b.location : '');
   out.lead.reserva_uid = b.uid; out.lead.reserva_inicio = b.start; out.lead.reserva_status = 'reservado'; out.lead.estado = 'reservado';
   out.lead.reserva_link = link; out.lead.reserva_criada_em = new Date().toISOString();
+  if (p.acao === 'reservar' && lead.ementa !== 'enviada' && cfg.ementa_resumo) out.lead.ementa = 'enviada';
   const convite = semEmail ? 'Como não tenho seu e-mail, o acesso fica aqui na conversa' : `o convite foi enviado para ${lead.email}`;
   out.resposta = [
     `Combinado${lead.nome ? ', ' + lead.nome : ''}! ${p.acao === 'remarcar' ? 'Remarquei para' : 'Marcado para'} ${quando(b.start)} (horário de Brasília). Seu encontro com o Willian terá 30 minutos e ${convite}.`,
     link ? `Acesso: ${link}` : 'O link de acesso chega por aqui 15 minutos antes.',
     'No dia, às 8h, eu confirmo sua presença; 1 hora antes, lembro você de se preparar; e 15 minutos antes, envio o link de novo.',
+    ...(p.acao === 'reservar' && lead.ementa !== 'enviada' && cfg.ementa_resumo ? [cfg.ementa_resumo] : []),
     'Traga suas dúvidas e uma visão geral da rotina que deseja melhorar. Se precisar remarcar, é só avisar por aqui!',
   ].join('\n\n');
   out.avisar = true;
@@ -322,7 +341,8 @@ f.add("Config", "n8n-nodes-base.postgres", 2.8,
           "COALESCE(MAX(valor) FILTER (WHERE chave='instancia'),'atendimento') AS instancia, "
           "COALESCE(MAX(valor) FILTER (WHERE chave='notificar_numero'),'') AS notificar_numero, "
           "COALESCE(MAX(valor) FILTER (WHERE chave='calcom_evento'),'30min') AS calcom_evento, "
-          "COALESCE(MAX(valor) FILTER (WHERE chave='email_sem_convite'),'') AS email_sem_convite FROM config", ""),
+          "COALESCE(MAX(valor) FILTER (WHERE chave='email_sem_convite'),'') AS email_sem_convite, "
+          "COALESCE(MAX(valor) FILTER (WHERE chave='ementa_resumo'),'') AS ementa_resumo FROM config", ""),
       creds=CRED["postgres"], executeOnce=True)
 f.add("Aplicar modo", "n8n-nodes-base.code", 2, code(DECIDE))
 f.add("Atender?", "n8n-nodes-base.if", 2.2, cond("={{ $json.rota }}", "equals", "atender"))
@@ -397,6 +417,7 @@ f.add("Salvar lead", "n8n-nodes-base.postgres", 2.8,
           "experiencia = COALESCE(d.experiencia, l.experiencia), problema = COALESCE(d.problema, l.problema), "
           "interesse = COALESCE(d.interesse, l.interesse), ementa = COALESCE(d.ementa, l.ementa), "
           "sabe_programar = COALESCE(d.sabe_programar, l.sabe_programar), "
+          "email_solicitado = l.email_solicitado OR COALESCE(d.email_solicitado IN ('sim', 'true'), false), "
           "duvidas_pendentes = COALESCE(d.duvidas_pendentes, l.duvidas_pendentes), "
           "preferencia_agenda = COALESCE(d.preferencia_agenda, l.preferencia_agenda), "
           "estado = COALESCE(d.estado, l.estado), reserva_uid = COALESCE(d.reserva_uid, l.reserva_uid), "
@@ -413,7 +434,7 @@ f.add("Salvar lead", "n8n-nodes-base.postgres", 2.8,
           "atualizado_em = now() "
           "FROM jsonb_to_record($2::jsonb) AS d(nome text, email text, telefone_preferencial text, "
           "contato_avisos_confirmado text, perfil text, objetivo text, experiencia text, problema text, interesse text, "
-          "ementa text, sabe_programar text, duvidas_pendentes text, preferencia_agenda text, estado text, "
+          "ementa text, sabe_programar text, email_solicitado text, duvidas_pendentes text, preferencia_agenda text, estado text, "
           "reserva_uid text, reserva_inicio text, reserva_status text, reserva_link text, reserva_criada_em text) "
           "WHERE l.jid = $1 RETURNING l.*",
           "={{ [$json.jid, JSON.stringify($json.lead), $json.humano, $json.parada] }}"),
