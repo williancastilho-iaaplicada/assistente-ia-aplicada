@@ -163,35 +163,54 @@ for (const [k, v] of Object.entries(lead)) {
   if (v !== null && v !== '' && !['criado_em', 'atualizado_em', 'atendimento_humano'].includes(k)) conhecido[k] = v;
 }
 let agenda = 'Agenda indisponível no momento: não ofereça horários; registre a preferência de dia e período.';
-let eventTypeId = null;
+let eventTypeId = null, conta = 'willian';
 try {
   const cfg = $('Config').first().json;
-  const h = { Authorization: 'Bearer ' + $env.CALCOM_API_KEY };
-  const et = await this.helpers.httpRequest({ url: 'https://api.cal.com/v2/event-types',
-    headers: { ...h, 'cal-api-version': '2024-06-14' }, json: true });
-  const ev = (et.data || []).find(e => e.slug === (cfg.calcom_evento || '30min'));
-  if (ev) {
-    eventTypeId = ev.id;
-    const dia = d => d.toISOString().slice(0, 10);
-    const ini = new Date(), fim = new Date(Date.now() + 14 * 864e5);
+  const dia = d => d.toISOString().slice(0, 10);
+  const ini = new Date(), fim = new Date(Date.now() + 14 * 864e5);
+  // The first account is required (its free slots are offered); the second is optional (joins when free).
+  const contas = [];
+  if ($env.CALCOM_API_KEY_GUILHERME) contas.push({ conta: 'guilherme', nome: 'Guilherme', key: $env.CALCOM_API_KEY_GUILHERME, slug: cfg.calcom_evento_guilherme || '30min' });
+  contas.push({ conta: 'willian', nome: 'Willian', key: $env.CALCOM_API_KEY, slug: cfg.calcom_evento || '30min' });
+  const carregar = async c => {
+    const h = { Authorization: 'Bearer ' + c.key };
+    const et = await this.helpers.httpRequest({ url: 'https://api.cal.com/v2/event-types', headers: { ...h, 'cal-api-version': '2024-06-14' }, json: true });
+    const ev = (et.data || []).find(e => e.slug === c.slug);
+    if (!ev) return null;
     const sl = await this.helpers.httpRequest({ url: `https://api.cal.com/v2/slots?eventTypeId=${ev.id}&start=${dia(ini)}&end=${dia(fim)}&timeZone=${TZ}`,
       headers: { ...h, 'cal-api-version': '2024-09-04' }, json: true });
-    const linhas = [];
-    for (const [d, lista] of Object.entries(sl.data || {}).slice(0, 10)) {
-      const hs = lista.map(x => x.start.slice(11, 16));
-      const faixas = [];
+    return { ev, dias: sl.data || {} };
+  };
+  const principal = await carregar(contas[0]);
+  let opcional = null;
+  if (contas[1]) { try { opcional = await carregar(contas[1]); } catch (e) {} }
+  if (principal) {
+    eventTypeId = principal.ev.id; conta = contas[0].conta;
+    const len = principal.ev.lengthInMinutes;
+    const livresOpc = new Set(opcional ? Object.values(opcional.dias).flat().map(x => new Date(x.start).getTime()) : []);
+    const faixas = hs => {
+      const f = [];
       for (const hh of hs) {
         const [H, M] = hh.split(':').map(Number);
-        const last = faixas[faixas.length - 1];
+        const last = f[f.length - 1];
         const prev = last && last[1].split(':').map(Number);
-        if (last && (H * 60 + M) - (prev[0] * 60 + prev[1]) === ev.lengthInMinutes) last[1] = hh;
-        else faixas.push([hh, hh]);
+        if (last && (H * 60 + M) - (prev[0] * 60 + prev[1]) === len) last[1] = hh; else f.push([hh, hh]);
       }
+      return f.map(x => x[0] === x[1] ? x[0] : `${x[0]}–${x[1]}`).join(', ');
+    };
+    const linhas = [];
+    for (const [d, lista] of Object.entries(principal.dias).slice(0, 10)) {
       const nomeDia = new Date(d + 'T12:00:00-03:00').toLocaleDateString('pt-BR', { timeZone: TZ, weekday: 'short', day: '2-digit', month: '2-digit' });
-      linhas.push(`${nomeDia} (${d}): início às ` + faixas.map(f => f[0] === f[1] ? f[0] : `${f[0]}–${f[1]}`).join(', '));
+      if (contas.length === 1) { linhas.push(`${nomeDia} (${d}): início às ${faixas(lista.map(x => x.start.slice(11, 16)))}`); continue; }
+      const juntos = lista.filter(x => livresOpc.has(new Date(x.start).getTime())).map(x => x.start.slice(11, 16));
+      const so = lista.filter(x => !livresOpc.has(new Date(x.start).getTime())).map(x => x.start.slice(11, 16));
+      const partes = [];
+      if (juntos.length) partes.push(`com ${contas[1].nome} e ${contas[0].nome}: ${faixas(juntos)}`);
+      if (so.length) partes.push(`só com ${contas[0].nome}: ${faixas(so)}`);
+      linhas.push(`${nomeDia} (${d}): ${partes.join(' | ')}`);
     }
     agenda = linhas.length
-      ? `Horários livres para o encontro de ${ev.lengthInMinutes} min (horário de Brasília; inícios a cada ${ev.lengthInMinutes} min dentro de cada faixa):\n` + linhas.join('\n')
+      ? `Horários livres para o encontro de ${len} min (horário de Brasília; inícios a cada ${len} min dentro de cada faixa):\n` + linhas.join('\n')
       : 'Sem horários livres nos próximos 14 dias: registre a preferência de dia e período e encaminhe ao Willian.';
   }
 } catch (e) {}
@@ -201,7 +220,7 @@ const faltam = Object.keys(perguntas).filter(k => !lead[k]).map(k => perguntas[k
 const qualif = faltam.length ? `Qualificação pendente, nesta ordem: ${faltam.join('; ')}.` : 'Qualificação completa.';
 const emailInfo = lead.email ? '' : (lead.email_solicitado ? 'E-mail já foi pedido uma vez: não peça de novo.' : 'E-mail ainda não foi pedido.');
 const texto = `[contexto]\nAgora: ${agora} (horário de Brasília)\nDados registrados do lead: ${JSON.stringify(conhecido)}\n${qualif} ${emailInfo}\n${agenda}\n[/contexto]\n\n${parts.join('\n')}`;
-return [{ json: { sessionId: 'mem:' + lead.jid, chatInput: texto, jid: lead.jid, eventTypeId } }];
+return [{ json: { sessionId: 'mem:' + lead.jid, chatInput: texto, jid: lead.jid, eventTypeId, conta } }];
 """
 
 PARSE_OUTPUT = r"""
@@ -248,6 +267,7 @@ const texto = [
   `Principal Gargalo/Rotina: ${v(l.problema)}`,
   `Interesse Identificado: ${v(l.interesse, 'indefinido')}`,
   `Status da Ementa: ${v(l.ementa, 'não solicitada')}`,
+  `Participantes: ${v(l.reserva_com, 'o Willian')}`,
   `Status da Agenda: ${l.reserva_status === 'reservado' ? 'Reservado em ' + quando + (l.reserva_link ? ' · ' + l.reserva_link : '') : l.reserva_status === 'cancelado' ? 'Cancelado' : 'Pendente de horário'}${l.preferencia_agenda ? ' (preferência: ' + l.preferencia_agenda + ')' : ''}`,
   `Próximo Passo: ${p.acao === 'encaminhar_humano' ? 'responder o contato (bot pausado para ele; mande #bot na conversa para devolver)' : (p.acao === 'registrar_preferencia_agenda' ? 'confirmar o horário com o contato' : 'nenhuma ação necessária; o convite saiu pelo Cal.com')}`,
 ].join('\n');
@@ -265,19 +285,23 @@ const TZ = 'America/Sao_Paulo';
 const antes = $('Lead').first().json;
 const lead = { ...antes, ...p.lead };
 const cfg = $('Config').first().json;
+const chave = c => c === 'guilherme' ? $env.CALCOM_API_KEY_GUILHERME : $env.CALCOM_API_KEY;
 if (!['reservar', 'remarcar', 'cancelar_reserva'].includes(p.acao)) {
   if (p.lead.email && !antes.email && antes.reserva_uid && antes.reserva_status === 'reservado' && new Date(antes.reserva_inicio) > new Date()) {
     try {
       await this.helpers.httpRequest({ method: 'POST', url: `https://api.cal.com/v2/bookings/${antes.reserva_uid}/guests`, json: true,
-        headers: { Authorization: 'Bearer ' + $env.CALCOM_API_KEY, 'cal-api-version': '2024-08-13' },
+        headers: { Authorization: 'Bearer ' + chave(antes.reserva_conta || 'willian'), 'cal-api-version': '2024-08-13' },
         body: { guests: [{ email: p.lead.email, name: lead.nome || 'Convidado' }] } });
       out.resposta = `${out.resposta}\n\nPronto, enviei o convite do encontro também para ${p.lead.email}.`.trim();
     } catch (e) {}
   }
   return [{ json: out }];
 }
-const eventTypeId = $('Montar entrada').first().json.eventTypeId;
-const h = { Authorization: 'Bearer ' + $env.CALCOM_API_KEY, 'cal-api-version': '2024-08-13' };
+const entrada = $('Montar entrada').first().json;
+const eventTypeId = entrada.eventTypeId;
+const conta = p.acao === 'reservar' ? entrada.conta : (lead.reserva_conta || 'willian');
+const h = { Authorization: 'Bearer ' + chave(conta), 'cal-api-version': '2024-08-13' };
+const com = lead.reserva_com || 'o Willian';
 const quando = iso => new Date(iso).toLocaleString('pt-BR', { timeZone: TZ, weekday: 'long', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 const falha = 'Não consegui concluir a reserva desse horário. Posso consultar novas opções ou encaminhar seu pedido ao Willian.';
 try {
@@ -286,7 +310,7 @@ try {
     await this.helpers.httpRequest({ method: 'POST', url: `https://api.cal.com/v2/bookings/${lead.reserva_uid}/cancel`, headers: h,
       body: { cancellationReason: 'Cancelado pelo contato no WhatsApp' }, json: true });
     out.lead.reserva_status = 'cancelado'; out.lead.estado = 'cancelado';
-    out.resposta = 'Pronto, cancelei o seu encontro com o Willian. Se quiser marcar outro horário, é só me avisar por aqui.';
+    out.resposta = `Pronto, cancelei o seu encontro com ${com}. Se quiser marcar outro horário, é só me avisar por aqui.`;
     out.avisar = true;
     return [{ json: out }];
   }
@@ -315,11 +339,32 @@ try {
   const b = r.data || {};
   const link = b.meetingUrl || (typeof b.location === 'string' && b.location.startsWith('http') ? b.location : '');
   out.lead.reserva_uid = b.uid; out.lead.reserva_inicio = b.start; out.lead.reserva_status = 'reservado'; out.lead.estado = 'reservado';
-  out.lead.reserva_link = link; out.lead.reserva_criada_em = new Date().toISOString();
+  out.lead.reserva_link = link; out.lead.reserva_criada_em = new Date().toISOString(); out.lead.reserva_conta = conta;
+  // Booked on Guilherme's calendar: Willian joins as a guest when he is free at that time.
+  let participantes = 'o Willian';
+  if (conta === 'guilherme') {
+    participantes = 'o Guilherme';
+    try {
+      const hw = { Authorization: 'Bearer ' + $env.CALCOM_API_KEY };
+      const et = await this.helpers.httpRequest({ url: 'https://api.cal.com/v2/event-types', headers: { ...hw, 'cal-api-version': '2024-06-14' }, json: true });
+      const ev = (et.data || []).find(e => e.slug === (cfg.calcom_evento || '30min'));
+      const d = new Date(b.start).toLocaleDateString('en-CA', { timeZone: TZ });
+      const sl = ev && await this.helpers.httpRequest({ url: `https://api.cal.com/v2/slots?eventTypeId=${ev.id}&start=${d}&end=${d}&timeZone=${TZ}`,
+        headers: { ...hw, 'cal-api-version': '2024-09-04' }, json: true });
+      const livre = sl && Object.values(sl.data || {}).flat().some(x => new Date(x.start).getTime() === new Date(b.start).getTime());
+      if (livre && cfg.email_willian) {
+        const ja = (b.guests || []).includes(cfg.email_willian) || lead.reserva_com === 'o Willian e o Guilherme';
+        if (!ja) await this.helpers.httpRequest({ method: 'POST', url: `https://api.cal.com/v2/bookings/${b.uid}/guests`, headers: h, json: true,
+          body: { guests: [{ email: cfg.email_willian, name: 'Willian Castilho' }] } });
+        participantes = 'o Willian e o Guilherme';
+      }
+    } catch (e) {}
+  }
+  out.lead.reserva_com = participantes;
   if (p.acao === 'reservar' && lead.ementa !== 'enviada' && cfg.ementa_resumo) out.lead.ementa = 'enviada';
   const convite = semEmail ? 'Como não tenho seu e-mail, o acesso fica aqui na conversa' : `o convite foi enviado para ${lead.email}`;
   out.resposta = [
-    `Combinado${lead.nome ? ', ' + lead.nome : ''}! ${p.acao === 'remarcar' ? 'Remarquei para' : 'Marcado para'} ${quando(b.start)} (horário de Brasília). Seu encontro com o Willian terá 30 minutos e ${convite}.`,
+    `Combinado${lead.nome ? ', ' + lead.nome : ''}! ${p.acao === 'remarcar' ? 'Remarquei para' : 'Marcado para'} ${quando(b.start)} (horário de Brasília). Seu encontro com ${participantes} terá 30 minutos e ${convite}.`,
     link ? `Acesso: ${link}` : 'O link de acesso chega por aqui 15 minutos antes.',
     'No dia, às 8h, eu confirmo sua presença; 1 hora antes, lembro você de se preparar; e 15 minutos antes, envio o link de novo.',
     ...(p.acao === 'reservar' && lead.ementa !== 'enviada' && cfg.ementa_resumo ? [cfg.ementa_resumo] : []),
@@ -424,6 +469,7 @@ f.add("Salvar lead", "n8n-nodes-base.postgres", 2.8,
           "reserva_inicio = COALESCE(d.reserva_inicio::timestamptz, l.reserva_inicio), "
           "reserva_status = COALESCE(d.reserva_status, l.reserva_status), "
           "reserva_link = COALESCE(d.reserva_link, l.reserva_link), "
+          "reserva_conta = COALESCE(d.reserva_conta, l.reserva_conta), reserva_com = COALESCE(d.reserva_com, l.reserva_com), "
           "reserva_criada_em = COALESCE(d.reserva_criada_em::timestamptz, l.reserva_criada_em), "
           "lembrete_8h_em = CASE WHEN d.reserva_inicio IS NOT NULL THEN NULL ELSE l.lembrete_8h_em END, "
           "briefing_reserva_em = CASE WHEN d.reserva_inicio IS NOT NULL THEN NULL ELSE l.briefing_reserva_em END, "
@@ -435,7 +481,7 @@ f.add("Salvar lead", "n8n-nodes-base.postgres", 2.8,
           "FROM jsonb_to_record($2::jsonb) AS d(nome text, email text, telefone_preferencial text, "
           "contato_avisos_confirmado text, perfil text, objetivo text, experiencia text, problema text, interesse text, "
           "ementa text, sabe_programar text, email_solicitado text, duvidas_pendentes text, preferencia_agenda text, estado text, "
-          "reserva_uid text, reserva_inicio text, reserva_status text, reserva_link text, reserva_criada_em text) "
+          "reserva_uid text, reserva_inicio text, reserva_status text, reserva_link text, reserva_criada_em text, reserva_conta text, reserva_com text) "
           "WHERE l.jid = $1 RETURNING l.*",
           "={{ [$json.jid, JSON.stringify($json.lead), $json.humano, $json.parada] }}"),
       creds=CRED["postgres"])
@@ -483,7 +529,7 @@ f.chain("Resumo para o Willian", "Enviar resumo", "Registrar envio do resumo")
 
 # ---------------------------------------------------------------- Reminders
 LEMBRETES_SQL = (
-    "SELECT * FROM (SELECT jid, nome, reserva_uid, reserva_inicio, reserva_link, "
+    "SELECT * FROM (SELECT jid, nome, reserva_uid, reserva_inicio, reserva_link, reserva_conta, reserva_com, "
     "CASE "
     "WHEN lembrete_15m_em IS NULL AND now() >= reserva_inicio - interval '15 minutes' AND now() < reserva_inicio + interval '5 minutes' THEN '15m' "
     "WHEN lembrete_1h_em IS NULL AND now() >= reserva_inicio - interval '60 minutes' AND now() < reserva_inicio - interval '15 minutes' THEN '1h' "
@@ -500,11 +546,12 @@ SEND_REMINDERS = r"""
 // Checks each booking on Cal.com, then sends the due reminder. Missed windows are skipped, never sent late.
 const MARKER = '⁣', TZ = 'America/Sao_Paulo';
 const cfg = $('Config lembretes').first().json;
-const h = { Authorization: 'Bearer ' + $env.CALCOM_API_KEY, 'cal-api-version': '2024-08-13' };
 const out = [];
 for (const it of $input.all()) {
   const r = it.json;
   if (!r.tipo) continue;
+  const h = { Authorization: 'Bearer ' + (r.reserva_conta === 'guilherme' ? $env.CALCOM_API_KEY_GUILHERME : $env.CALCOM_API_KEY), 'cal-api-version': '2024-08-13' };
+  const com = r.reserva_com || 'o Willian';
   let b;
   try { b = (await this.helpers.httpRequest({ url: `https://api.cal.com/v2/bookings/${r.reserva_uid}`, headers: h, json: true })).data; }
   catch (e) { continue; }
@@ -514,9 +561,9 @@ for (const it of $input.all()) {
   const hora = new Date(b.start).toLocaleTimeString('pt-BR', { timeZone: TZ, hour: '2-digit', minute: '2-digit' });
   const nome = r.nome ? ', ' + r.nome : '';
   const textos = {
-    '8h': `Bom dia${nome}! Hoje, às ${hora} (horário de Brasília), é o seu encontro de 30 minutos com o Willian. Você confirma sua presença?`,
-    '1h': `Olá${nome}! Falta 1 hora para o seu encontro com o Willian, às ${hora}. Separe suas dúvidas e uma visão geral da rotina que você quer melhorar. Daqui a pouco envio o link por aqui.`,
-    '15m': `Seu encontro com o Willian começa em 15 minutos, às ${hora}.` + (link ? ` Acesse por aqui: ${link}` : ' O link está no convite.'),
+    '8h': `Bom dia${nome}! Hoje, às ${hora} (horário de Brasília), é o seu encontro de 30 minutos com ${com}. Você confirma sua presença?`,
+    '1h': `Olá${nome}! Falta 1 hora para o seu encontro com ${com}, às ${hora}. Separe suas dúvidas e uma visão geral da rotina que você quer melhorar. Daqui a pouco envio o link por aqui.`,
+    '15m': `Seu encontro com ${com} começa em 15 minutos, às ${hora}.` + (link ? ` Acesse por aqui: ${link}` : ' O link está no convite.'),
   };
   const texto = textos[r.tipo];
   try {

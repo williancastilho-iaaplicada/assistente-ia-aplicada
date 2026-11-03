@@ -67,3 +67,10 @@ INSERT INTO config (chave, valor) VALUES ('email_briefing', '') ON CONFLICT (cha
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS email_solicitado boolean NOT NULL DEFAULT false;
 -- Syllabus summary sent with the booking confirmation (private text, set directly in the database).
 INSERT INTO config (chave, valor) VALUES ('ementa_resumo', '') ON CONFLICT (chave) DO NOTHING;
+
+-- Shared calendar: Guilherme's account is required when configured; Willian joins as a guest when free.
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS reserva_conta text;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS reserva_com text;
+INSERT INTO config (chave, valor) VALUES ('calcom_evento_guilherme', '30min') ON CONFLICT (chave) DO NOTHING;
+-- Willian's address for meeting invites (set the real value directly in the database).
+INSERT INTO config (chave, valor) VALUES ('email_willian', '') ON CONFLICT (chave) DO NOTHING;
