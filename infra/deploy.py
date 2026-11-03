@@ -71,7 +71,7 @@ n8n = {
     "WEBHOOK_SECRET": env["WEBHOOK_SECRET"], "QR_PAGE_TOKEN": env["QR_PAGE_TOKEN"],
     "CALCOM_API_KEY": env.get("CALCOM_API_KEY", ""),
     "CALCOM_API_KEY_GUILHERME": env.get("CALCOM_API_KEY_GUILHERME", ""),
-    "RESEND_API_KEY": env.get("RESEND_API_KEY", ""), "RESEND_FROM": env.get("RESEND_FROM", ""),
+    "RESEND_API_KEY": env.get("RESEND_API_KEY", ""), "RESEND_FROM": env.get("RESEND_FROM", ""), "RESEND_REPLY_TO": env.get("RESEND_REPLY_TO", ""),
     "EXECUTIONS_DATA_SAVE_ON_SUCCESS": "none", "EXECUTIONS_DATA_SAVE_ON_PROGRESS": "false",
     "CREDENTIALS_OVERWRITE_DATA": json.dumps({
         "anthropicApi": {"apiKey": env["ANTHROPIC_API_KEY"]},
