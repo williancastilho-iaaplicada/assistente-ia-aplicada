@@ -2,7 +2,7 @@
 # Creates the "chatbot" Easypanel project and its 4 services. Reads secrets from .env; never prints them.
 import json, os, sys, urllib.request, urllib.error
 D = os.path.expanduser("~/projetos/chatbot-infra")
-env = dict(l.rstrip("\n").split("=", 1) for l in open(f"{D}/.env") if "=" in l)
+env = {k: v.strip().strip('"') for k, v in (l.rstrip("\n").split("=", 1) for l in open(f"{D}/.env") if "=" in l)}
 TOKEN = env["EASYPANEL_TOKEN"]
 P, DOM = "chatbot", "fakvga.easypanel.host"
 N8N_HOST, EVO_HOST = f"{P}-n8n.{DOM}", f"{P}-evolution.{DOM}"
