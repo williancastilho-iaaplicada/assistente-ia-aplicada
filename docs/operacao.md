@@ -47,7 +47,7 @@ O modo é lido a cada mensagem: muda na hora, sem reiniciar nada.
 ### Dados dos leads e briefing
 - Banco Postgres na VPS (`chatbot`): tabela `leads` (cadastro, reserva, lembretes) e tabela `mensagens` (conversa completa, dos dois lados, inclusive lembretes).
 - Para ver pelo navegador: Easypanel → projeto `chatbot` → serviço `db` → botão DbGate. Dá para filtrar e exportar.
-- Briefing por e-mail (fluxo "Briefing por e-mail", a cada 5 minutos): um e-mail quando a reunião é marcada e outro 1 hora antes, com resumo feito pela IA, cadastro, link e conversa completa. O destinatário é a chave `email_briefing` da tabela `config`; o envio usa o Resend (`RESEND_API_KEY` no `.env`; remetente opcional em `RESEND_FROM`, padrão `onboarding@resend.dev`; depois `python3 infra/deploy.py update-n8n`). Sem domínio verificado, o Resend só entrega para o e-mail da própria conta.
+- Briefing por e-mail (fluxo "Briefing por e-mail", a cada 5 minutos): um e-mail quando a reunião é marcada e outro 1 hora antes, com resumo feito pela IA, cadastro, link e conversa completa. Os destinatários ficam na chave `email_briefing` da tabela `config` (vários, separados por vírgula); o envio usa o Resend (`RESEND_API_KEY` no `.env`; remetente opcional em `RESEND_FROM`, padrão `onboarding@resend.dev`; depois `python3 infra/deploy.py update-n8n`). Sem domínio verificado, o Resend só entrega para o e-mail da própria conta.
 
 ### Riscos conhecidos
 - WhatsApp não oficial: o número pode ser bloqueado pelo WhatsApp. Use para validação; a API oficial fica para depois.

@@ -664,7 +664,7 @@ br.add("Enviar e-mail", "n8n-nodes-base.httpRequest", 4.2, {
     "method": "POST", "url": "https://api.resend.com/emails",
     "sendHeaders": True, "headerParameters": {"parameters": [{"name": "Authorization", "value": "=Bearer {{ $env.RESEND_API_KEY }}"}]},
     "sendBody": True, "specifyBody": "json",
-    "jsonBody": "={{ JSON.stringify({ from: $env.RESEND_FROM || 'Assistente IA Aplicada <onboarding@resend.dev>', to: [$json.para], subject: $json.assunto, html: $json.html }) }}",
+    "jsonBody": "={{ JSON.stringify({ from: $env.RESEND_FROM || 'Assistente IA Aplicada <onboarding@resend.dev>', to: String($json.para).split(',').map(x => x.trim()).filter(Boolean), subject: $json.assunto, html: $json.html }) }}",
     "options": {}})
 br.add("Registrar briefing", "n8n-nodes-base.postgres", 2.8,
        sql("UPDATE leads SET briefing_reserva_em = CASE WHEN $2 = 'reserva' THEN now() ELSE briefing_reserva_em END, "
