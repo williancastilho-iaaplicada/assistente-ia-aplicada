@@ -90,11 +90,13 @@ def cond(left, op, right=None, type_="string"):
                            "conditions": [c], "combinator": "and"}, "options": {}}
 
 
-def evolution_send(number_expr, text_expr):
+def evolution_send(number_expr, text_expr, typing=False):
+    # typing=True shows "typing..." first, for a time proportional to the reply (1.5 to 7 seconds).
+    delay = (", delay: Math.min(7000, Math.max(1500, String(" + text_expr + ").length * 25))") if typing else ""
     return {"method": "POST", "url": "={{ $env.EVOLUTION_URL }}/message/sendText/{{ $('Config').first().json.instancia }}",
             "sendHeaders": True, "headerParameters": EVO_HEADERS, "sendBody": True, "specifyBody": "json",
-            "jsonBody": "={{ JSON.stringify({ number: " + number_expr + ", text: " + text_expr + " + '" + MARKER + "' }) }}",
-            "options": {}}
+            "jsonBody": "={{ JSON.stringify({ number: " + number_expr + ", text: " + text_expr + " + '" + MARKER + "'" + delay + " }) }}",
+            "options": {"timeout": 30000}}
 
 
 # ---------------------------------------------------------------- Atendimento
@@ -490,7 +492,7 @@ f.add("Salvar lead", "n8n-nodes-base.postgres", 2.8,
           "={{ [$json.jid, JSON.stringify($json.lead), $json.humano, $json.parada] }}"),
       creds=CRED["postgres"])
 f.add("Enviar resposta", "n8n-nodes-base.httpRequest", 4.2,
-      evolution_send("$('Aplicar modo').first().json.jid", "$('Executar agenda').first().json.resposta"))
+      evolution_send("$('Aplicar modo').first().json.jid", "$('Executar agenda').first().json.resposta", typing=True))
 f.add("Registrar envio", "n8n-nodes-base.redis", 1,
       {"operation": "set", "key": "=sent:{{ $json.key.id }}", "value": "1", "keyType": "string", "expire": True, "ttl": SENT_TTL_SECONDS},
       creds=CRED["redis"])
