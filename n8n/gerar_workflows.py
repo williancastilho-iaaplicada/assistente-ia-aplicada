@@ -272,8 +272,9 @@ const texto = [
   `Próximo Passo: ${p.acao === 'encaminhar_humano' ? 'responder o contato (bot pausado para ele; mande #bot na conversa para devolver)' : (p.acao === 'registrar_preferencia_agenda' ? 'confirmar o horário com o contato' : 'nenhuma ação necessária; o convite saiu pelo Cal.com')}`,
 ].join('\n');
 const cfg = $('Config').first().json;
-const destino = cfg.notificar_numero || $('Filtrar entrada').first().json.owner;
-return [{ json: { destino, texto } }];
+// One message per number in notificar_numero (comma-separated); empty means the connected number itself.
+const destinos = String(cfg.notificar_numero || $('Filtrar entrada').first().json.owner).split(',').map(x => x.replace(/\D/g, '')).filter(Boolean);
+return destinos.map(destino => ({ json: { destino, texto } }));
 """
 
 

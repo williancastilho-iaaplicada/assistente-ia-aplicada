@@ -18,7 +18,7 @@
 | Ver o modo | `docker exec $(docker ps -qf "name=^chatbot_db\.") psql -U postgres -d chatbot -c "select * from config"` |
 | Mudar para cliente | `... -c "update config set valor='all' where chave='modo'"` |
 | Voltar para teste | `... -c "update config set valor='self_only' where chave='modo'"` |
-| Avisos para outro número | `... -c "update config set valor='55DDNUMERO' where chave='notificar_numero'"` (vazio = o próprio número conectado) |
+| Avisos para outro número | `... -c "update config set valor='55DDNUMERO' where chave='notificar_numero'"` (vários separados por vírgula; vazio = o próprio número conectado) |
 | Devolver um contato ao bot | Mande `#bot` na conversa com ele (modo `all`) |
 | Mudar o roteiro | Edite `prompt/` ou a base privada e rode `n8n/publicar.sh` |
 | Testar filtros sem WhatsApp | `testes/simular.sh <jid> <fromMe> <id> "<texto>"` |
