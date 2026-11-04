@@ -2,7 +2,7 @@
 # Creates the "chatbot" Easypanel project and its 4 services. Reads secrets from .env; never prints them.
 import json, os, sys, urllib.request, urllib.error
 D = os.path.expanduser("~/projetos/chatbot-infra")
-env = dict(l.rstrip("\n").split("=", 1) for l in open(f"{D}/.env") if "=" in l)
+env = {k: v.strip().strip('"') for k, v in (l.rstrip("\n").split("=", 1) for l in open(f"{D}/.env") if "=" in l)}
 TOKEN = env["EASYPANEL_TOKEN"]
 P, DOM = "chatbot", "fakvga.easypanel.host"
 N8N_HOST, EVO_HOST = f"{P}-n8n.{DOM}", f"{P}-evolution.{DOM}"
@@ -70,7 +70,8 @@ n8n = {
     "EVOLUTION_API_KEY": env["EVOLUTION_API_KEY"], "EVOLUTION_URL": f"http://{P}_evolution:8080",
     "WEBHOOK_SECRET": env["WEBHOOK_SECRET"], "QR_PAGE_TOKEN": env["QR_PAGE_TOKEN"],
     "CALCOM_API_KEY": env.get("CALCOM_API_KEY", ""),
-    "RESEND_API_KEY": env.get("RESEND_API_KEY", ""), "RESEND_FROM": env.get("RESEND_FROM", ""),
+    "CALCOM_API_KEY_GUILHERME": env.get("CALCOM_API_KEY_GUILHERME", ""),
+    "RESEND_API_KEY": env.get("RESEND_API_KEY", ""), "RESEND_FROM": env.get("RESEND_FROM", ""), "RESEND_REPLY_TO": env.get("RESEND_REPLY_TO", ""),
     "EXECUTIONS_DATA_SAVE_ON_SUCCESS": "none", "EXECUTIONS_DATA_SAVE_ON_PROGRESS": "false",
     "CREDENTIALS_OVERWRITE_DATA": json.dumps({
         "anthropicApi": {"apiKey": env["ANTHROPIC_API_KEY"]},
