@@ -348,7 +348,8 @@ try {
       const hw = { Authorization: 'Bearer ' + $env.CALCOM_API_KEY };
       const et = await this.helpers.httpRequest({ url: 'https://api.cal.com/v2/event-types', headers: { ...hw, 'cal-api-version': '2024-06-14' }, json: true });
       const ev = (et.data || []).find(e => e.slug === (cfg.calcom_evento || '30min'));
-      const d = new Date(b.start).toLocaleDateString('en-CA', { timeZone: TZ });
+      // Brasília date (UTC-3, no DST) without relying on locale data in the runner.
+      const d = new Date(new Date(b.start).getTime() - 3 * 3600e3).toISOString().slice(0, 10);
       const sl = ev && await this.helpers.httpRequest({ url: `https://api.cal.com/v2/slots?eventTypeId=${ev.id}&start=${d}&end=${d}&timeZone=${TZ}`,
         headers: { ...hw, 'cal-api-version': '2024-09-04' }, json: true });
       const livre = sl && Object.values(sl.data || {}).flat().some(x => new Date(x.start).getTime() === new Date(b.start).getTime());
@@ -362,7 +363,7 @@ try {
   }
   out.lead.reserva_com = participantes;
   if (p.acao === 'reservar' && lead.ementa !== 'enviada' && cfg.ementa_resumo) out.lead.ementa = 'enviada';
-  const convite = semEmail ? 'Como não tenho seu e-mail, o acesso fica aqui na conversa' : `o convite foi enviado para ${lead.email}`;
+  const convite = semEmail ? 'como não tenho seu e-mail, o acesso fica aqui na conversa' : `o convite foi enviado para ${lead.email}`;
   out.resposta = [
     `Combinado${lead.nome ? ', ' + lead.nome : ''}! ${p.acao === 'remarcar' ? 'Remarquei para' : 'Marcado para'} ${quando(b.start)} (horário de Brasília). Seu encontro com ${participantes} terá 30 minutos e ${convite}.`,
     link ? `Acesso: ${link}` : 'O link de acesso chega por aqui 15 minutos antes.',
@@ -387,7 +388,9 @@ f.add("Config", "n8n-nodes-base.postgres", 2.8,
           "COALESCE(MAX(valor) FILTER (WHERE chave='notificar_numero'),'') AS notificar_numero, "
           "COALESCE(MAX(valor) FILTER (WHERE chave='calcom_evento'),'30min') AS calcom_evento, "
           "COALESCE(MAX(valor) FILTER (WHERE chave='email_sem_convite'),'') AS email_sem_convite, "
-          "COALESCE(MAX(valor) FILTER (WHERE chave='ementa_resumo'),'') AS ementa_resumo FROM config", ""),
+          "COALESCE(MAX(valor) FILTER (WHERE chave='ementa_resumo'),'') AS ementa_resumo, "
+          "COALESCE(MAX(valor) FILTER (WHERE chave='email_willian'),'') AS email_willian, "
+          "COALESCE(MAX(valor) FILTER (WHERE chave='calcom_evento_guilherme'),'30min') AS calcom_evento_guilherme FROM config", ""),
       creds=CRED["postgres"], executeOnce=True)
 f.add("Aplicar modo", "n8n-nodes-base.code", 2, code(DECIDE))
 f.add("Atender?", "n8n-nodes-base.if", 2.2, cond("={{ $json.rota }}", "equals", "atender"))
