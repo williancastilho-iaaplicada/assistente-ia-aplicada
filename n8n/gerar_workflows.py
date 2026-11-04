@@ -18,9 +18,16 @@ OUT = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else HERE / "workflows")
 BASE = pathlib.Path(os.environ.get("BASE_CONHECIMENTO", "~/projetos/chatbot-infra/conhecimento/base_conhecimento.md")).expanduser()
 if not BASE.is_file():
     sys.exit(f"Base de conhecimento não encontrada / knowledge base not found: {BASE}")
+# The assistant speaks for the brand "Mentoria e IA Aplicada", never as Willian's personal assistant.
+MARCA = [("assistente virtual do Willian Castilho · IA Aplicada", "assistente virtual da Mentoria e IA Aplicada"),
+         ("Willian Castilho · IA Aplicada", "Mentoria e IA Aplicada")]
+def marca(texto):
+    for a, b in MARCA:
+        texto = texto.replace(a, b)
+    return texto
 PROMPT = "\n\n---\n\n".join([
-    "# Base de conhecimento\n\n" + BASE.read_text(),
-    "# Especificação do atendimento\n\n" + (HERE.parent / "prompt" / "ChatBot.md").read_text(),
+    "# Base de conhecimento\n\n" + marca(BASE.read_text()),
+    "# Especificação do atendimento\n\n" + marca((HERE.parent / "prompt" / "ChatBot.md").read_text()),
     (HERE.parent / "prompt" / "operacao.md").read_text(),
 ])
 
@@ -207,13 +214,13 @@ try {
       const juntos = lista.filter(x => livresOpc.has(new Date(x.start).getTime())).map(x => x.start.slice(11, 16));
       const so = lista.filter(x => !livresOpc.has(new Date(x.start).getTime())).map(x => x.start.slice(11, 16));
       const partes = [];
-      if (juntos.length) partes.push(`com ${contas[1].nome} e ${contas[0].nome}: ${faixas(juntos)}`);
-      if (so.length) partes.push(`só com ${contas[0].nome}: ${faixas(so)}`);
+      if (juntos.length) partes.push(`com os dois mentores: ${faixas(juntos)}`);
+      if (so.length) partes.push(`com um mentor: ${faixas(so)}`);
       linhas.push(`${nomeDia} (${d}): ${partes.join(' | ')}`);
     }
     agenda = linhas.length
       ? `Horários livres para o encontro de ${len} min (horário de Brasília; inícios a cada ${len} min dentro de cada faixa):\n` + linhas.join('\n')
-      : 'Sem horários livres nos próximos 14 dias: registre a preferência de dia e período e encaminhe ao Willian.';
+      : 'Sem horários livres nos próximos 14 dias: registre a preferência de dia e período e encaminhe à equipe.';
   }
 } catch (e) {}
 const perguntas = { objetivo: 'objetivo principal com IA', experiencia: 'como usa IA hoje', sabe_programar: 'se sabe programar',
@@ -304,9 +311,11 @@ const entrada = $('Montar entrada').first().json;
 const eventTypeId = entrada.eventTypeId;
 const conta = p.acao === 'reservar' ? entrada.conta : (lead.reserva_conta || 'willian');
 const h = { Authorization: 'Bearer ' + chave(conta), 'cal-api-version': '2024-08-13' };
-const com = lead.reserva_com || 'o Willian';
+// Customers never see names: both mentors or one mentor.
+const publico = c => c === 'o Willian e o Guilherme' ? 'nossos dois mentores' : 'um dos nossos mentores';
+const com = publico(lead.reserva_com);
 const quando = iso => new Date(iso).toLocaleString('pt-BR', { timeZone: TZ, weekday: 'long', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-const falha = 'Não consegui concluir a reserva desse horário. Posso consultar novas opções ou encaminhar seu pedido ao Willian.';
+const falha = 'Não consegui concluir a reserva desse horário. Posso consultar novas opções ou encaminhar seu pedido à nossa equipe.';
 try {
   if (p.acao === 'cancelar_reserva') {
     if (!lead.reserva_uid) throw new Error('sem reserva');
@@ -368,7 +377,7 @@ try {
   if (p.acao === 'reservar' && lead.ementa !== 'enviada' && cfg.ementa_resumo) out.lead.ementa = 'enviada';
   const convite = semEmail ? 'como não tenho seu e-mail, o acesso fica aqui na conversa' : `o convite foi enviado para ${lead.email}`;
   out.resposta = [
-    `Combinado${lead.nome ? ', ' + lead.nome : ''}! ${p.acao === 'remarcar' ? 'Remarquei para' : 'Marcado para'} ${quando(b.start)} (horário de Brasília). Seu encontro com ${participantes} terá 30 minutos e ${convite}.`,
+    `Combinado${lead.nome ? ', ' + lead.nome : ''}! ${p.acao === 'remarcar' ? 'Remarquei para' : 'Marcado para'} ${quando(b.start)} (horário de Brasília). Seu encontro com ${publico(participantes)} terá 30 minutos e ${convite}.`,
     link ? `Acesso: ${link}` : 'O link de acesso chega por aqui 15 minutos antes.',
     'No dia, às 8h, eu confirmo sua presença; 1 hora antes, lembro você de se preparar; e 15 minutos antes, envio o link de novo.',
     ...(p.acao === 'reservar' && lead.ementa !== 'enviada' && cfg.ementa_resumo ? [cfg.ementa_resumo] : []),
@@ -557,7 +566,7 @@ for (const it of $input.all()) {
   const r = it.json;
   if (!r.tipo) continue;
   const h = { Authorization: 'Bearer ' + (r.reserva_conta === 'guilherme' ? $env.CALCOM_API_KEY_GUILHERME : $env.CALCOM_API_KEY), 'cal-api-version': '2024-08-13' };
-  const com = r.reserva_com || 'o Willian';
+  const com = r.reserva_com === 'o Willian e o Guilherme' ? 'nossos dois mentores' : 'um dos nossos mentores';
   let b;
   try { b = (await this.helpers.httpRequest({ url: `https://api.cal.com/v2/bookings/${r.reserva_uid}`, headers: h, json: true })).data; }
   catch (e) { continue; }
